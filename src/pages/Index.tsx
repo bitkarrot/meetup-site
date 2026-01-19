@@ -1,4 +1,5 @@
 import {} from 'react';
+import { nip19 } from 'nostr-tools';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -38,8 +39,15 @@ interface BlogPost {
 
 function AuthorInfo({ pubkey }: { pubkey: string }) {
   const { data: author } = useAuthor(pubkey);
-  // @ts-expect-error - window.nostrTools is injected
-  const npub = pubkey ? window.nostrTools?.nip19.npubEncode(pubkey) : '';
+  
+  let npub = '';
+  try {
+    if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) {
+      npub = nip19.npubEncode(pubkey);
+    }
+  } catch (e) {
+    console.error('Error encoding npub:', e);
+  }
 
   return (
     <div className="flex items-center gap-2 mb-4">
@@ -48,14 +56,20 @@ function AuthorInfo({ pubkey }: { pubkey: string }) {
         <AvatarFallback>{author?.metadata?.name?.charAt(0) || '?'}</AvatarFallback>
       </Avatar>
       <div className="flex flex-col">
-        <a 
-          href={`https://nostr.at/${npub}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-medium hover:underline"
-        >
-          {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-        </a>
+        {npub ? (
+          <a 
+            href={`https://nostr.at/${npub}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium hover:underline"
+          >
+            {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
+          </a>
+        ) : (
+          <span className="text-xs font-medium">
+            {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -227,7 +241,7 @@ function BlogSection({ posts }: { posts: BlogPost[] }) {
                 </CardHeader>
                 <CardContent>
                   <AuthorInfo pubkey={post.pubkey} />
-                  <div className="text-sm text-muted-foreground line-clamp-3 mb-4 prose prose-sm dark:prose-invert">
+                  <div className="text-sm text-muted-foreground line-clamp-3 mb-4 prose prose-sm dark:prose-invert max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {post.content.slice(0, 150) + (post.content.length > 150 ? '...' : '')}
                     </ReactMarkdown>

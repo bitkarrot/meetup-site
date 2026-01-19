@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { nip19 } from 'nostr-tools';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,7 +30,15 @@ interface BlogPost {
 
 function AuthorInfo({ pubkey }: { pubkey: string }) {
   const { data: author } = useAuthor(pubkey);
-  const npub = pubkey ? (window as { nostrTools?: { nip19: { npubEncode: (pubkey: string) => string } } }).nostrTools?.nip19.npubEncode(pubkey) : '';
+  
+  let npub = '';
+  try {
+    if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) {
+      npub = nip19.npubEncode(pubkey);
+    }
+  } catch (e) {
+    console.error('Error encoding npub:', e);
+  }
 
   return (
     <div className="flex items-center gap-2">
@@ -37,14 +46,20 @@ function AuthorInfo({ pubkey }: { pubkey: string }) {
         <AvatarImage src={author?.metadata?.picture} />
         <AvatarFallback>{author?.metadata?.name?.charAt(0) || '?'}</AvatarFallback>
       </Avatar>
-      <a 
-        href={`https://nostr.at/${npub}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs font-medium hover:underline"
-      >
-        {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-      </a>
+      {npub ? (
+        <a 
+          href={`https://nostr.at/${npub}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs font-medium hover:underline"
+        >
+          {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
+        </a>
+      ) : (
+        <span className="text-xs font-medium">
+          {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
+        </span>
+      )}
     </div>
   );
 }
@@ -207,7 +222,7 @@ export default function AdminBlog() {
                     />
                   </TabsContent>
                   <TabsContent value="preview" className="mt-2">
-                    <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none">
+                    <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {formData.content || "*Nothing to preview*"}
                       </ReactMarkdown>

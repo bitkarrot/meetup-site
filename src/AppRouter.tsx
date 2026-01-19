@@ -17,6 +17,7 @@ import AdminLoginPage from "./pages/admin/AdminLoginPage";
 import EventsPage from "./pages/EventsPage";
 import EventPage from "./pages/EventPage";
 import BlogPage from "./pages/BlogPage";
+import BlogPostPage from "./pages/BlogPostPage";
 
 function AdminRoutes() {
   return <AdminWrapper />;
@@ -32,6 +33,7 @@ export function AppRouter() {
         <Route path="/events" element={<EventsPage />} />
         <Route path="/event/:eventId" element={<EventPage />} />
         <Route path="/blog" element={<BlogPage />} />
+        <Route path="/blog/:postId" element={<BlogPostPage />} />
         {/* Admin routes */}
         <Route path="/admin" element={<AdminRoutes />}>
           <Route index element={<AdminPage />} />
