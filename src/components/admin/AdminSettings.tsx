@@ -52,7 +52,7 @@ export default function AdminSettings() {
     { id: '5', name: 'Contact', href: '/contact', isSubmenu: false },
   ]);
 
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>({
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => ({
     title: 'My Meetup Site',
     logo: '',
     favicon: '',
@@ -65,8 +65,10 @@ export default function AdminSettings() {
     maxEvents: 6,
     maxBlogPosts: 3,
     defaultRelay: import.meta.env.VITE_DEFAULT_RELAY || '',
-    publishRelays: (import.meta.env.VITE_PUBLISH_RELAYS || '').split(',').filter(Boolean),
-  });
+    publishRelays: Array.from(
+      (import.meta.env.VITE_PUBLISH_RELAYS || '').split(',').filter(Boolean)
+    ),
+  }));
 
   // Load existing site configuration from NIP-78 kind 30078
   useEffect(() => {
@@ -102,8 +104,10 @@ export default function AdminSettings() {
             publishRelays: (() => {
               const relaysTag = event.tags.find(([name]) => name === 'publish_relays')?.[1];
               const defaultRelays = (import.meta.env.VITE_PUBLISH_RELAYS || '').split(',').filter(Boolean);
+              if (!relaysTag) return defaultRelays;
               try {
-                return relaysTag ? JSON.parse(relaysTag) : defaultRelays;
+                const parsed = JSON.parse(relaysTag);
+                return Array.isArray(parsed) ? parsed : defaultRelays;
               } catch {
                 return defaultRelays;
               }
