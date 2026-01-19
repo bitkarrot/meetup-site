@@ -11,8 +11,8 @@ const defaultNavigation = [
   { id: 'home', name: 'Home', href: '/', isSubmenu: false },
   { id: 'events', name: 'Events', href: '/events', isSubmenu: false },
   { id: 'blog', name: 'Blog', href: '/blog', isSubmenu: false },
-  { id: 'about', name: 'About', href: '/p/about', isSubmenu: false },
-  { id: 'contact', name: 'Contact', href: '/p/contact', isSubmenu: false },
+  { id: 'about', name: 'About', href: '/about', isSubmenu: false },
+  { id: 'contact', name: 'Contact', href: '/contact', isSubmenu: false },
 ];
 
 export default function Navigation() {

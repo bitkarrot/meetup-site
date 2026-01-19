@@ -37,6 +37,8 @@ export function AppRouter() {
         <Route path="/blog" element={<BlogPage />} />
         <Route path="/blog/:postId" element={<BlogPostPage />} />
         {/* Static pages (about, contact, etc.) */}
+        <Route path="/about" element={<StaticPage pathOverride="/about" />} />
+        <Route path="/contact" element={<StaticPage pathOverride="/contact" />} />
         <Route path="/p/:path" element={<StaticPage />} />
         {/* Admin routes */}
         <Route path="/admin" element={<AdminRoutes />}>

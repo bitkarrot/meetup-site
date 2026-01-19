@@ -7,11 +7,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import Navigation from '@/components/Navigation';
 import { useEffect, useState } from 'react';
 
-export default function StaticPage() {
+export default function StaticPage({ pathOverride }: { pathOverride?: string }) {
   const { path } = useParams<{ path: string }>();
   const { nostr } = useDefaultRelay();
   const [content, setContent] = useState<string | null>(null);
-  const fullPath = `/${path}`;
+  const fullPath = pathOverride || `/${path}`;
 
   const { data: pageEvent, isLoading: isEventLoading } = useQuery({
     queryKey: ['static-page', fullPath],
