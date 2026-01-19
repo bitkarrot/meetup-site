@@ -4,13 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQueryClient } from '@tanstack/react-query';
-import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useNostr } from '@nostrify/react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Save, Plus, Trash2, GripVertical } from 'lucide-react';
 
 interface NavigationItem {
@@ -38,22 +37,13 @@ interface SiteConfig {
 }
 
 export default function AdminSettings() {
-  const { config, updateConfig } = useAppContext();
+  const { updateConfig } = useAppContext();
   const { mutate: createEvent } = useNostrPublish();
   const queryClient = useQueryClient();
+  const { nostr } = useNostr();
+  const { user } = useCurrentUser();
   const [isSaving, setIsSaving] = useState(false);
-  
-  let poolNostr;
-  try {
-    const hookResult = useDefaultRelay();
-    poolNostr = hookResult.poolNostr;
-  } catch (error) {
-    console.error('Failed to initialize default relay:', error);
-    // Fall back to regular nostr
-    const { nostr: fallbackNostr } = useNostr();
-    poolNostr = fallbackNostr;
-  }
-  
+
   const [navigation, setNavigation] = useState<NavigationItem[]>([
     { id: '1', label: 'Home', href: '/', isSubmenu: false },
     { id: '2', label: 'Events', href: '/events', isSubmenu: false },
@@ -74,23 +64,26 @@ export default function AdminSettings() {
     showBlog: true,
     maxEvents: 6,
     maxBlogPosts: 3,
-    defaultRelay: 'wss://swarm.hivetalk.org',
-    publishRelays: [
-      'wss://relay.damus.io',
-      'wss://relay.primal.net',
-      'wss://nos.lol',
-    ],
+    defaultRelay: import.meta.env.VITE_DEFAULT_RELAY,
+    publishRelays: import.meta.env.VITE_PUBLISH_RELAYS.split(','),
   });
 
-  // Load existing site configuration
-  // useEffect(() => {
+  // Load existing site configuration from NIP-78 kind 30078
+  useEffect(() => {
     const loadExistingConfig = async () => {
+      if (!user) return;
+
       try {
         const signal = AbortSignal.timeout(3000);
-        const events = await poolNostr.query([
-          { kinds: [30000], '#d': ['site-config'], limit: 1 }
+        const events = await nostr.query([
+          {
+            kinds: [30078],
+            authors: [user.pubkey],
+            '#d': ['nostr-meetup-site-config'],
+            limit: 1
+          }
         ], { signal });
-        
+
         if (events.length > 0) {
           const event = events[0];
           const loadedConfig = {
@@ -105,17 +98,17 @@ export default function AdminSettings() {
             showBlog: event.tags.find(([name]) => name === 'show_blog')?.[1] === 'true',
             maxEvents: parseInt(event.tags.find(([name]) => name === 'max_events')?.[1] || '6'),
             maxBlogPosts: parseInt(event.tags.find(([name]) => name === 'max_blog_posts')?.[1] || '3'),
-            defaultRelay: event.tags.find(([name]) => name === 'default_relay')?.[1] || 'wss://swarm.hivetalk.org',
+            defaultRelay: event.tags.find(([name]) => name === 'default_relay')?.[1] || import.meta.env.VITE_DEFAULT_RELAY,
             publishRelays: (() => {
               const relaysTag = event.tags.find(([name]) => name === 'publish_relays')?.[1];
               try {
-                return relaysTag ? JSON.parse(relaysTag) : ['wss://relay.damus.io', 'wss://relay.primal.net', 'wss://nos.lol'];
+                return relaysTag ? JSON.parse(relaysTag) : import.meta.env.VITE_PUBLISH_RELAYS.split(',');
               } catch {
-                return ['wss://relay.damus.io', 'wss://relay.primal.net', 'wss://nos.lol'];
+                return import.meta.env.VITE_PUBLISH_RELAYS.split(',');
               }
             })(),
           };
-          
+
           // Also load navigation from content
           let loadedNavigation = [];
           try {
@@ -123,7 +116,7 @@ export default function AdminSettings() {
           } catch {
             // Use default navigation
           }
-          
+
           setSiteConfig(loadedConfig);
           setNavigation(loadedNavigation);
           // Update local app config immediately
@@ -132,7 +125,7 @@ export default function AdminSettings() {
             siteConfig: loadedConfig,
             navigation: loadedNavigation,
           }));
-          
+
           // Clear all query cache to force refresh with new config
           queryClient.clear();
         }
@@ -140,16 +133,19 @@ export default function AdminSettings() {
         console.error('Failed to load existing config:', error);
       }
     };
-    
-    // loadExistingConfig();
-  // }, [poolNostr, updateConfig, queryClient, setSiteConfig, setNavigation]);
+
+    loadExistingConfig();
+  }, [nostr, updateConfig, queryClient, user]);
+
+  // Load existing site configuration
+
 
   const handleSaveConfig = async () => {
     setIsSaving(true);
     try {
-      // Save site configuration as a replaceable event (kind 30000)
+      // Save site configuration as a replaceable event (kind 30078) following NIP-78
       const configTags = [
-        ['d', 'site-config'],
+        ['d', 'nostr-meetup-site-config'],
         ['title', siteConfig.title],
         ['logo', siteConfig.logo],
         ['favicon', siteConfig.favicon],
@@ -166,7 +162,7 @@ export default function AdminSettings() {
       ];
 
       createEvent({
-        kind: 30000,
+        kind: 30078,
         content: JSON.stringify({ navigation }),
         tags: configTags,
       });
@@ -177,7 +173,7 @@ export default function AdminSettings() {
         siteConfig,
         navigation,
       }));
-      
+
       // Clear all query cache to force refresh with new config
       queryClient.clear();
     } catch (error) {
@@ -323,7 +319,7 @@ export default function AdminSettings() {
               id="defaultRelay"
               value={siteConfig.defaultRelay}
               onChange={(e) => setSiteConfig(prev => ({ ...prev, defaultRelay: e.target.value }))}
-              placeholder="wss://swarm.hivetalk.org"
+              placeholder={import.meta.env.VITE_DEFAULT_RELAY}
             />
             <p className="text-xs text-muted-foreground mt-1">
               This relay will be used to read all content for the public site.

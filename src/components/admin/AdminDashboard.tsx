@@ -2,10 +2,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { FileText, Calendar, Users, Eye } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useNostr } from '@nostrify/react';
+import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 
 export default function AdminDashboard() {
-  const { nostr } = useNostr();
+  const { nostr } = useDefaultRelay();
 
   // Fetch blog posts (kind 30023 - Long-form content)
   const { data: blogPosts } = useQuery({

@@ -8,9 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TipTapEditor } from '@/components/TipTapEditor';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { Plus, Edit, Trash2, Calendar, MapPin } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useNostr } from '@nostrify/react';
 
 interface MeetupEvent {
   id: string;
@@ -27,7 +27,7 @@ interface MeetupEvent {
 }
 
 export default function AdminEvents() {
-  const { nostr } = useNostr();
+  const { nostr } = useDefaultRelay();
   const { user } = useCurrentUser();
   const { mutate: createEvent } = useNostrPublish();
   const [isCreating, setIsCreating] = useState(false);

@@ -37,10 +37,10 @@ const defaultConfig: AppConfig = {
   theme: "light",
   relayMetadata: {
     relays: [
-      { url: 'wss://swarm.hivetalk.org', read: true, write: true }, // Default relay for drafts
-      { url: 'wss://relay.damus.io', read: true, write: true },
-      { url: 'wss://relay.primal.net', read: true, write: true },
-      { url: 'wss://nos.lol', read: true, write: true },
+      { url: import.meta.env.VITE_DEFAULT_RELAY, read: true, write: true },
+      { url: import.meta.env.VITE_READ_RELAY_1, read: true, write: true },
+      { url: import.meta.env.VITE_READ_RELAY_2, read: true, write: true },
+      { url: import.meta.env.VITE_READ_RELAY_3, read: true, write: true },
     ],
     updatedAt: 0,
   },

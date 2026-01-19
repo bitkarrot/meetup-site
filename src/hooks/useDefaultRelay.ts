@@ -5,10 +5,10 @@ export function useDefaultRelay() {
   const { config } = useAppContext();
   const { nostr: poolNostr } = useNostr();
   
-  // Get the default relay from site config or fall back to first relay
-  const defaultRelayUrl = config.siteConfig?.defaultRelay || 
-    config.relayMetadata?.relays?.[0]?.url || 
-    'wss://swarm.hivetalk.org';
+  // Get the default relay from site config or fall back to environment variable or first relay
+  const defaultRelayUrl = config.siteConfig?.defaultRelay ||
+    import.meta.env.VITE_DEFAULT_RELAY ||
+    config.relayMetadata?.relays?.[0]?.url;
   
   // Create a dedicated connection to the default relay only
   const defaultRelay = poolNostr.relay(defaultRelayUrl);

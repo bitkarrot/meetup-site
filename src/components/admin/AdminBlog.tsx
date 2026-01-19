@@ -8,9 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { TipTapEditor } from '@/components/TipTapEditor';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { Plus, Edit, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useNostr } from '@nostrify/react';
 
 interface BlogPost {
   id: string;
@@ -22,7 +22,7 @@ interface BlogPost {
 }
 
 export default function AdminBlog() {
-  const { nostr } = useNostr();
+  const { nostr } = useDefaultRelay();
   const { user } = useCurrentUser();
   const { mutate: createEvent } = useNostrPublish();
   const [isCreating, setIsCreating] = useState(false);

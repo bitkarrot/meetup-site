@@ -56,42 +56,57 @@ export default function Navigation() {
           <div className="hidden md:flex items-center space-x-8">
             {configNavigation.map((item) => (
               <Link
-                key={item.name}
+                key={item.id}
                 to={item.href}
                 className={`text-sm font-medium transition-colors hover:text-primary ${
                   isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'
                 }`}
               >
-                {item.label}
+                {item.name}
               </Link>
             ))}
           </div>
 
           {/* Right side items */}
           <div className="flex items-center space-x-4">
-            {user && (
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/admin">
-                  <Settings className="h-4 w-4" />
-                  <span className="hidden sm:inline ml-2">Admin</span>
-                </Link>
-              </Button>
-            )}
-            
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="md:hidden"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
-              {theme === 'dark' ? (
-                <Sun className="h-4 w-4" />
+              {mobileMenuOpen ? (
+                <X className="h-5 w-5" />
               ) : (
-                <Moon className="h-4 w-4" />
+                <Menu className="h-5 w-5" />
               )}
-              <span className="hidden sm:inline ml-2">Toggle Theme</span>
             </Button>
-            
-            <LoginArea className="hidden sm:flex" />
+
+            <div className="hidden md:flex items-center space-x-4">
+              {user && (
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to="/admin">
+                    <Settings className="h-4 w-4" />
+                    <span className="ml-2">Admin</span>
+                  </Link>
+                </Button>
+              )}
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              >
+                {theme === 'dark' ? (
+                  <Sun className="h-4 w-4" />
+                ) : (
+                  <Moon className="h-4 w-4" />
+                )}
+                <span className="ml-2">Toggle Theme</span>
+              </Button>
+
+              <LoginArea />
+            </div>
           </div>
         </div>
 
@@ -101,16 +116,27 @@ export default function Navigation() {
             <div className="space-y-3">
               {configNavigation.map((item) => (
                 <Link
-                  key={item.name}
+                  key={item.id}
                   to={item.href}
                   className={`text-sm font-medium transition-colors hover:text-primary ${
                     isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'
                   }`}
                   onClick={() => setMobileMenuOpen(false)}
                 >
-                  {item.label}
+                  {item.name}
                 </Link>
               ))}
+            </div>
+            <div className="mt-4 pt-4 border-t">
+              {user && (
+                <Button variant="ghost" size="sm" asChild className="w-full justify-start">
+                  <Link to="/admin" onClick={() => setMobileMenuOpen(false)}>
+                    <Settings className="h-4 w-4 mr-2" />
+                    Admin
+                  </Link>
+                </Button>
+              )}
+              <LoginArea className="flex" />
             </div>
           </div>
         )}
