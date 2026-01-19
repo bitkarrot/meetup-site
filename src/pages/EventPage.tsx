@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import Navigation from '@/components/Navigation';
 import EventRSVP from '@/components/EventRSVP';
 import { useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -106,8 +107,10 @@ export default function EventPage() {
   const isPast = event.end ? event.end * 1000 < Date.now() : event.start * 1000 < Date.now();
 
   return (
-    <div className="min-h-screen py-8">
-      <div className="max-w-4xl mx-auto px-4 space-y-6">
+    <div className="min-h-screen">
+      <Navigation />
+      <div className="py-8">
+        <div className="max-w-4xl mx-auto px-4 space-y-6">
         {/* Back Button */}
         <Button variant="ghost" asChild>
           <Link to="/events" className="flex items-center gap-2">
@@ -178,5 +181,6 @@ export default function EventPage() {
         <EventRSVP event={event} />
       </div>
     </div>
-  );
+  </div>
+);
 }
