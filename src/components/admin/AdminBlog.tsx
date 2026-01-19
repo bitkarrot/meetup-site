@@ -94,15 +94,18 @@ export default function AdminBlog() {
         { kinds: [30023], limit: 100 }
       ], { signal });
       
-      return events.map(event => ({
-        id: event.id,
-        title: event.tags.find(([name]) => name === 'title')?.[1] || 'Untitled',
-        content: event.content,
-        published: event.tags.find(([name]) => name === 'published')?.[1] === 'true' || !event.tags.find(([name]) => name === 'published'),
-        created_at: event.created_at,
-        d: event.tags.find(([name]) => name === 'd')?.[1] || event.id,
-        pubkey: event.pubkey,
-      }));
+      return events.map(event => {
+        const tags = event.tags || [];
+        return {
+          id: event.id,
+          title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled',
+          content: event.content,
+          published: tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published'),
+          created_at: event.created_at,
+          d: tags.find(([name]) => name === 'd')?.[1] || event.id,
+          pubkey: event.pubkey,
+        };
+      });
     },
   });
 

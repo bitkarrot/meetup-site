@@ -97,8 +97,9 @@ export default function AdminDashboard() {
           <CardContent>
             <div className="space-y-4">
               {blogPosts?.slice(0, 5).map((post) => {
-                const title = post.tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
-                const published = post.tags.find(([name]) => name === 'published')?.[1] === 'true' || !post.tags.find(([name]) => name === 'published');
+                const tags = post.tags || [];
+                const title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
+                const published = tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published');
                 
                 return (
                   <div key={post.id} className="flex items-center justify-between">
@@ -131,9 +132,10 @@ export default function AdminDashboard() {
           <CardContent>
             <div className="space-y-4">
               {events?.slice(0, 5).map((event) => {
-                const title = event.tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event';
-                const start = event.tags.find(([name]) => name === 'start')?.[1];
-                const status = event.tags.find(([name]) => name === 'status')?.[1] || 'confirmed';
+                const tags = event.tags || [];
+                const title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event';
+                const start = tags.find(([name]) => name === 'start')?.[1];
+                const status = tags.find(([name]) => name === 'status')?.[1] || 'confirmed';
                 
                 return (
                   <div key={event.id} className="flex items-center justify-between">

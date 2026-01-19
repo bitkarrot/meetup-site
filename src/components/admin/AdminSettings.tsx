@@ -126,27 +126,29 @@ export default function AdminSettings() {
           defaultRelay: 'default_relay'
         };
 
+        const eventTags = event.tags || [];
+
         Object.entries(tags).forEach(([key, tagName]) => {
-          const val = event.tags.find(([name]) => name === tagName)?.[1];
+          const val = eventTags.find(([name]) => name === tagName)?.[1];
           if (val !== undefined) {
             (loadedConfig as Record<string, string | boolean | number | string[] | undefined>)[key] = val;
           }
         });
 
         // Handle booleans and numbers separately
-        const showEvents = event.tags.find(([name]) => name === 'show_events')?.[1];
+        const showEvents = eventTags.find(([name]) => name === 'show_events')?.[1];
         if (showEvents !== undefined) loadedConfig.showEvents = showEvents === 'true';
         
-        const showBlog = event.tags.find(([name]) => name === 'show_blog')?.[1];
+        const showBlog = eventTags.find(([name]) => name === 'show_blog')?.[1];
         if (showBlog !== undefined) loadedConfig.showBlog = showBlog === 'true';
         
-        const maxEvents = event.tags.find(([name]) => name === 'max_events')?.[1];
+        const maxEvents = eventTags.find(([name]) => name === 'max_events')?.[1];
         if (maxEvents !== undefined) loadedConfig.maxEvents = parseInt(maxEvents);
         
-        const maxBlogPosts = event.tags.find(([name]) => name === 'max_blog_posts')?.[1];
+        const maxBlogPosts = eventTags.find(([name]) => name === 'max_blog_posts')?.[1];
         if (maxBlogPosts !== undefined) loadedConfig.maxBlogPosts = parseInt(maxBlogPosts);
 
-        const relaysTag = event.tags.find(([name]) => name === 'publish_relays')?.[1];
+        const relaysTag = eventTags.find(([name]) => name === 'publish_relays')?.[1];
         if (relaysTag) {
           try {
             const parsed = JSON.parse(relaysTag);

@@ -6,7 +6,9 @@ interface NostrJsonResponse {
   nip46?: Record<string, string[]>;
 }
 
-export function useRemoteNostrJson(url: string = 'https://honey.hivetalk.org/.well-known/nostr.json') {
+const DEFAULT_NOSTR_JSON_URL = import.meta.env.VITE_REMOTE_NOSTR_JSON_URL || 'https://honey.hivetalk.org/.well-known/nostr.json';
+
+export function useRemoteNostrJson(url: string = DEFAULT_NOSTR_JSON_URL) {
   return useQuery({
     queryKey: ['remote-nostr-json', url],
     queryFn: async () => {

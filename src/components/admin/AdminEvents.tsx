@@ -64,19 +64,22 @@ export default function AdminEvents() {
         { kinds: [31922, 31923], limit: 100 }
       ], { signal });
       
-      return events.map(event => ({
-        id: event.id,
-        title: event.tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
-        summary: event.tags.find(([name]) => name === 'summary')?.[1] || '',
-        description: event.content,
-        location: event.tags.find(([name]) => name === 'location')?.[1] || '',
-        start: parseInt(event.tags.find(([name]) => name === 'start')?.[1] || '0'),
-        end: event.tags.find(([name]) => name === 'end')?.[1] ? parseInt(event.tags.find(([name]) => name === 'end')![1]) : undefined,
-        kind: event.kind as 31922 | 31923,
-        status: event.tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
-        d: event.tags.find(([name]) => name === 'd')?.[1] || event.id,
-        image: event.tags.find(([name]) => name === 'image')?.[1],
-      }));
+      return events.map(event => {
+        const tags = event.tags || [];
+        return {
+          id: event.id,
+          title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
+          summary: tags.find(([name]) => name === 'summary')?.[1] || '',
+          description: event.content,
+          location: tags.find(([name]) => name === 'location')?.[1] || '',
+          start: parseInt(tags.find(([name]) => name === 'start')?.[1] || '0'),
+          end: tags.find(([name]) => name === 'end')?.[1] ? parseInt(tags.find(([name]) => name === 'end')![1]) : undefined,
+          kind: event.kind as 31922 | 31923,
+          status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
+          d: tags.find(([name]) => name === 'd')?.[1] || event.id,
+          image: tags.find(([name]) => name === 'image')?.[1],
+        };
+      });
     },
   });
 
