@@ -4,26 +4,52 @@ import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import Navigation from '@/components/Navigation';
 import { useEffect, useState } from 'react';
 
 export default function StaticPage({ pathOverride }: { pathOverride?: string }) {
   const { path } = useParams<{ path: string }>();
-  const { nostr } = useDefaultRelay();
+  const { poolNostr, nostr: defaultRelay } = useDefaultRelay();
   const [content, setContent] = useState<string | null>(null);
   const fullPath = pathOverride || `/${path}`;
 
-  const { data: pageEvent, isLoading: isEventLoading } = useQuery({
+  const { data: pageEvent, isLoading: isEventLoading, error, refetch } = useQuery({
     queryKey: ['static-page', fullPath],
     queryFn: async () => {
+      console.log('StaticPage: Querying for path:', fullPath);
       const signal = AbortSignal.timeout(5000);
-      const events = await nostr.query([
-        { kinds: [34128], '#d': [fullPath], limit: 1 }
-      ], { signal });
-      return events[0] || null;
+      
+      const unslashedPath = fullPath.startsWith('/') ? fullPath.slice(1) : fullPath;
+      const slashedPath = fullPath.startsWith('/') ? fullPath : `/${fullPath}`;
+      
+      const filters = [
+        { kinds: [34128], '#d': [slashedPath, unslashedPath] }
+      ];
+      
+      console.log('StaticPage: Filters:', filters);
+      
+      // Try pool first
+      let events = await poolNostr.query(filters, { signal });
+      
+      // If pool returns nothing, try default relay explicitly
+      if (events.length === 0 && defaultRelay) {
+        console.log('StaticPage: No events in pool, trying default relay');
+        events = await defaultRelay.query(filters, { signal });
+      }
+      
+      console.log('StaticPage: Found events:', events);
+      
+      return events.sort((a, b) => b.created_at - a.created_at)[0] || null;
     },
-    enabled: !!path,
+    enabled: !!fullPath,
+    staleTime: 30000, 
+    retry: 2,
   });
+
+  if (error) {
+    console.error('StaticPage: Error fetching event:', error);
+  }
 
   useEffect(() => {
     async function fetchFromBlossom() {
@@ -97,7 +123,11 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
         <Navigation />
         <main className="max-w-4xl mx-auto px-4 py-12 text-center">
           <h1 className="text-4xl font-bold mb-4">404</h1>
-          <p className="text-muted-foreground">Page not found</p>
+          <p className="text-muted-foreground mb-8">Page not found for path: {fullPath}</p>
+          <p className="text-muted-foreground mb-8">Tried pool and default relay, but no event found.</p>
+          <Button onClick={() => refetch()} variant="outline">
+            Try Again
+          </Button>
         </main>
       </div>
     );

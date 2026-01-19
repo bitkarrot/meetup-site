@@ -307,6 +307,11 @@ export default function AdminPages() {
                   </p>
                 </div>
                 <div className="flex gap-2 ml-4">
+                  <Button variant="ghost" size="sm" asChild title="View Page">
+                    <a href={page.path} target="_blank" rel="noopener noreferrer">
+                      <Eye className="h-4 w-4" />
+                    </a>
+                  </Button>
                   {user && page.pubkey === user.pubkey && (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(page)}>
