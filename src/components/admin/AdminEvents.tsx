@@ -28,6 +28,7 @@ interface MeetupEvent {
   status: string;
   d: string;
   image?: string;
+  pubkey: string;
 }
 
 export default function AdminEvents() {
@@ -97,6 +98,7 @@ export default function AdminEvents() {
           status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
           d: tags.find(([name]) => name === 'd')?.[1] || event.id,
           image: tags.find(([name]) => name === 'image')?.[1],
+          pubkey: event.pubkey,
         };
       });
     },
@@ -210,6 +212,10 @@ export default function AdminEvents() {
   };
 
   const handleEdit = (event: MeetupEvent) => {
+    if (user && event.pubkey !== user.pubkey) {
+      alert("You cannot edit another user's event.");
+      return;
+    }
     let startDate: Date;
     let endDate: Date | null = null;
 
@@ -242,6 +248,10 @@ export default function AdminEvents() {
   };
 
   const handleDelete = (event: MeetupEvent) => {
+    if (user && event.pubkey !== user.pubkey) {
+      alert("You cannot delete another user's event.");
+      return;
+    }
     if (confirm('Are you sure you want to delete this event?')) {
       publishEvent({
         event: {
@@ -528,12 +538,16 @@ export default function AdminEvents() {
                 </div>
                 
                 <div className="flex gap-2 ml-4">
-                  <Button variant="ghost" size="sm" onClick={() => handleEdit(event)}>
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => handleDelete(event)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {user && event.pubkey === user.pubkey && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(event)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleDelete(event)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </CardContent>
