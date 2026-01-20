@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useTheme } from '@/hooks/useTheme';
@@ -53,17 +54,19 @@ export default function Navigation() {
           </div>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
+          <div className="hidden md:flex items-center space-x-2">
             {configNavigation.map((item) => (
-              <Link
+              <Button
                 key={item.id}
-                to={item.href}
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'
-                }`}
+                variant="ghost"
+                size="sm"
+                asChild
+                className={isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'}
               >
-                {item.name}
-              </Link>
+                <Link to={item.href}>
+                  {item.name}
+                </Link>
+              </Button>
             ))}
           </div>
 
@@ -113,18 +116,25 @@ export default function Navigation() {
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
           <div className="md:hidden py-4 border-t">
-            <div className="flex flex-col space-y-4">
+            <div className="flex flex-col space-y-1">
               {configNavigation.map((item) => (
-                <Link
+                <Button
                   key={item.id}
-                  to={item.href}
-                  className={`text-base font-medium transition-colors hover:text-primary px-2 py-1 rounded-md ${
+                  variant="ghost"
+                  size="lg"
+                  asChild
+                  className={cn(
+                    "w-full justify-start text-base font-medium",
                     isActivePath(item.href) ? 'text-primary bg-primary/10' : 'text-muted-foreground'
-                  }`}
-                  onClick={() => setMobileMenuOpen(false)}
+                  )}
                 >
-                  {item.name}
-                </Link>
+                  <Link
+                    to={item.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    {item.name}
+                  </Link>
+                </Button>
               ))}
             </div>
             <div className="mt-4 pt-4 border-t space-y-4">
@@ -141,7 +151,7 @@ export default function Navigation() {
                 <Button
                   variant="ghost"
                   size="lg"
-                  className="w-full justify-start"
+                  className="w-full justify-start text-base font-medium"
                   onClick={() => {
                     setTheme(theme === 'dark' ? 'light' : 'dark');
                     setMobileMenuOpen(false);
