@@ -104,8 +104,6 @@ export default function AdminSystemSettings() {
 
   const masterPubkey = (import.meta.env.VITE_MASTER_PUBKEY || '').toLowerCase().trim();
   const isMasterUser = user?.pubkey.toLowerCase().trim() === masterPubkey;
-  const isPrimaryAdmin = user && config.siteConfig?.adminRoles?.[user.pubkey.toLowerCase().trim()] === 'primary';
-  const hasAccess = isMasterUser || isPrimaryAdmin;
 
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => ({
     title: config.siteConfig?.title ?? 'My Meetup Site',
@@ -129,7 +127,7 @@ export default function AdminSystemSettings() {
   const { data: remoteNostrJson } = useRemoteNostrJson();
 
   useEffect(() => {
-    if (!hasAccess || isSaving || isRefreshing) return;
+    if (!isMasterUser || isSaving || isRefreshing) return;
 
     if (config.siteConfig) {
       setSiteConfig(prev => ({
@@ -139,15 +137,15 @@ export default function AdminSystemSettings() {
         adminRoles: config.siteConfig?.adminRoles ?? prev.adminRoles,
       }) as SiteConfig);
     }
-  }, [config.siteConfig, isSaving, isRefreshing, hasAccess]);
+  }, [config.siteConfig, isSaving, isRefreshing, isMasterUser]);
 
-  if (!hasAccess) {
+  if (!isMasterUser) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
         <ShieldAlert className="h-12 w-12 text-destructive" />
         <h2 className="text-xl font-bold">Access Denied</h2>
         <p className="text-muted-foreground">
-          Only Primary Admins and the Master User can access these settings.
+          Only the Master User can access admin settings.
         </p>
       </div>
     );

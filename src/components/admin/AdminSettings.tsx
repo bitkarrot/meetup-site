@@ -10,7 +10,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Save, Plus, Trash2, GripVertical, RefreshCw } from 'lucide-react';
+import { Save, Plus, Trash2, GripVertical, RefreshCw, ShieldAlert } from 'lucide-react';
 
 interface NavigationItem {
   id: string;
@@ -44,8 +44,12 @@ export default function AdminSettings() {
   const queryClient = useQueryClient();
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
+
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const masterPubkey = (import.meta.env.VITE_MASTER_PUBKEY || '').toLowerCase().trim();
+  const isMasterUser = user?.pubkey.toLowerCase().trim() === masterPubkey;
 
   const [navigation, setNavigation] = useState<NavigationItem[]>(() => 
     config.navigation ?? [
@@ -98,6 +102,18 @@ export default function AdminSettings() {
       setNavigation(config.navigation);
     }
   }, [config.siteConfig, config.navigation, isSaving, isRefreshing]);
+
+  if (!isMasterUser) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <ShieldAlert className="h-12 w-12 text-destructive" />
+        <h2 className="text-xl font-bold">Access Denied</h2>
+        <p className="text-muted-foreground">
+          Only the Master User can access site settings.
+        </p>
+      </div>
+    );
+  }
 
   // Load existing site configuration from NIP-78 kind 30078
   const handleLoadConfig = async () => {

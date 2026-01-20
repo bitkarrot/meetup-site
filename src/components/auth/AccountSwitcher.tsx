@@ -10,10 +10,12 @@ import {
 } from '@/components/ui/dropdown-menu.tsx';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.tsx';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
+import { useLoginActions } from '@/hooks/useLoginActions';
 import { genUserName } from '@/lib/genUserName';
 
 export function AccountSwitcher() {
-  const { currentUser, removeLogin } = useLoggedInAccounts();
+  const { currentUser } = useLoggedInAccounts();
+  const { logout } = useLoginActions();
 
   if (!currentUser) return null;
 
@@ -37,7 +39,7 @@ export function AccountSwitcher() {
       </DropdownMenuTrigger>
       <DropdownMenuContent className='w-56 p-2 animate-scale-in'>
         <DropdownMenuItem
-          onClick={() => removeLogin(currentUser.id)}
+          onClick={() => logout()}
           className='flex items-center gap-2 cursor-pointer p-2 rounded-md text-red-500'
         >
           <LogOut className='w-4 h-4' />
