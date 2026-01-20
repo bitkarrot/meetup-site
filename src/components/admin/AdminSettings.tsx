@@ -35,8 +35,18 @@ interface SiteConfig {
   defaultRelay: string;
   publishRelays: string[];
   adminRoles: Record<string, 'primary' | 'secondary'>;
+  tweakcnThemeUrl?: string;
   updatedAt?: number;
 }
+
+const TWEAKCN_THEMES = [
+  { name: 'Default', url: '' },
+  { name: 'Tangerine', url: 'https://tweakcn.com/r/themes/tangerine.json' },
+  { name: 'Amethyst Haze', url: 'https://tweakcn.com/r/themes/amethyst-haze.json' },
+  { name: 'Midnight', url: 'https://tweakcn.com/r/themes/midnight.json' },
+  { name: 'Rose', url: 'https://tweakcn.com/r/themes/rose.json' },
+  { name: 'Slate', url: 'https://tweakcn.com/r/themes/slate.json' },
+];
 
 export default function AdminSettings() {
   const { config, updateConfig } = useAppContext();
@@ -78,6 +88,7 @@ export default function AdminSettings() {
       (import.meta.env.VITE_PUBLISH_RELAYS || '').split(',').filter(Boolean)
     ),
     adminRoles: config.siteConfig?.adminRoles ?? {},
+    tweakcnThemeUrl: config.siteConfig?.tweakcnThemeUrl ?? '',
   }));
 
   // Sync state with config when it changes (e.g. after loading from localStorage or Relay)
@@ -143,7 +154,8 @@ export default function AdminSettings() {
           heroTitle: 'hero_title',
           heroSubtitle: 'hero_subtitle',
           heroBackground: 'hero_background',
-          defaultRelay: 'default_relay'
+          defaultRelay: 'default_relay',
+          tweakcnThemeUrl: 'tweakcn_theme_url'
         };
 
         const eventTags = event.tags || [];
@@ -253,6 +265,7 @@ export default function AdminSettings() {
         ['default_relay', siteConfig.defaultRelay],
         ['publish_relays', JSON.stringify(siteConfig.publishRelays)],
         ['admin_roles', JSON.stringify(siteConfig.adminRoles)],
+        ['tweakcn_theme_url', siteConfig.tweakcnThemeUrl || ''],
         ['updated_at', Math.floor(Date.now() / 1000).toString()],
       ];
 
@@ -375,6 +388,55 @@ export default function AdminSettings() {
                 placeholder="https://..."
               />
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* TweakCN Theme Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Site Styling (TweakCN)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Select a Preset Theme</Label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {TWEAKCN_THEMES.map((theme) => (
+                <Button
+                  key={theme.name}
+                  variant={siteConfig.tweakcnThemeUrl === theme.url ? "default" : "outline"}
+                  className="w-full justify-start"
+                  onClick={() => setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: theme.url }))}
+                >
+                  {theme.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+          
+          <Separator />
+          
+          <div className="space-y-2">
+            <Label htmlFor="customThemeUrl">Custom TweakCN Theme URL</Label>
+            <div className="flex gap-2">
+              <Input
+                id="customThemeUrl"
+                value={siteConfig.tweakcnThemeUrl}
+                onChange={(e) => setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: e.target.value }))}
+                placeholder="https://tweakcn.com/r/themes/..."
+              />
+              {siteConfig.tweakcnThemeUrl && !TWEAKCN_THEMES.some(t => t.url === siteConfig.tweakcnThemeUrl) && (
+                <Button 
+                  variant="outline" 
+                  onClick={() => setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: '' }))}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Enter a direct link to a TweakCN theme JSON file to apply custom styling.
+            </p>
           </div>
         </CardContent>
       </Card>

@@ -30,6 +30,7 @@ interface SiteConfig {
   defaultRelay: string;
   publishRelays: string[];
   adminRoles: Record<string, 'primary' | 'secondary'>;
+  tweakcnThemeUrl?: string;
   updatedAt?: number;
 }
 
@@ -122,6 +123,7 @@ export default function AdminSystemSettings() {
       (import.meta.env.VITE_PUBLISH_RELAYS || '').split(',').filter(Boolean)
     ),
     adminRoles: config.siteConfig?.adminRoles ?? {},
+    tweakcnThemeUrl: config.siteConfig?.tweakcnThemeUrl ?? '',
   }));
 
   const { data: remoteNostrJson } = useRemoteNostrJson();
@@ -177,7 +179,8 @@ export default function AdminSystemSettings() {
           heroTitle: 'hero_title',
           heroSubtitle: 'hero_subtitle',
           heroBackground: 'hero_background',
-          defaultRelay: 'default_relay'
+          defaultRelay: 'default_relay',
+          tweakcnThemeUrl: 'tweakcn_theme_url'
         };
 
         const eventTags = event.tags || [];
@@ -267,6 +270,7 @@ export default function AdminSystemSettings() {
         ['default_relay', siteConfig.defaultRelay],
         ['publish_relays', JSON.stringify(siteConfig.publishRelays)],
         ['admin_roles', JSON.stringify(siteConfig.adminRoles)],
+        ['tweakcn_theme_url', siteConfig.tweakcnThemeUrl || ''],
         ['updated_at', Math.floor(Date.now() / 1000).toString()],
       ];
 

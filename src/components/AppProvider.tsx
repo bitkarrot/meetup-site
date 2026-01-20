@@ -41,6 +41,7 @@ const AppConfigSchema = z.object({
     defaultRelay: z.string().optional(),
     publishRelays: z.array(z.string()).optional(),
     adminRoles: z.record(z.string(), z.enum(['primary', 'secondary'])).optional(),
+    tweakcnThemeUrl: z.string().optional(),
     updatedAt: z.number().optional(),
   }).optional(),
   navigation: z.array(z.object({
@@ -131,11 +132,67 @@ export function AppProvider(props: AppProviderProps) {
   // Apply theme effects to document
   useApplyTheme(config.theme);
 
+  // Apply TweakCN theme if URL is provided
+  useTweakCNTheme(config.siteConfig?.tweakcnThemeUrl);
+
   return (
     <AppContext.Provider value={appContextValue}>
       {children}
     </AppContext.Provider>
   );
+}
+
+/**
+ * Hook to fetch and apply TweakCN theme from a URL
+ */
+function useTweakCNTheme(themeUrl?: string) {
+  useEffect(() => {
+    if (!themeUrl) {
+      // Remove existing TweakCN theme style tag if it exists
+      const existingStyle = document.getElementById('tweakcn-theme');
+      if (existingStyle) {
+        existingStyle.remove();
+      }
+      return;
+    }
+
+    const fetchTheme = async () => {
+      try {
+        const response = await fetch(themeUrl);
+        if (!response.ok) throw new Error('Failed to fetch theme');
+        const themeData = await response.json();
+
+        // TweakCN themes usually provide CSS variables in a specific format
+        // We'll create a style tag and inject the variables
+        let cssVars = '';
+        
+        // Handle both light and dark modes if provided in the JSON
+        if (themeData.light) {
+          cssVars += `:root { ${Object.entries(themeData.light).map(([k, v]) => `--${k}: ${v};`).join(' ')} }\n`;
+        }
+        if (themeData.dark) {
+          cssVars += `.dark { ${Object.entries(themeData.dark).map(([k, v]) => `--${k}: ${v};`).join(' ')} }\n`;
+        }
+        
+        // If it's a flat object (some TweakCN exports), apply it to root
+        if (!themeData.light && !themeData.dark) {
+          cssVars += `:root { ${Object.entries(themeData).map(([k, v]) => typeof v === 'string' ? `--${k}: ${v};` : '').join(' ')} }`;
+        }
+
+        let styleTag = document.getElementById('tweakcn-theme') as HTMLStyleElement;
+        if (!styleTag) {
+          styleTag = document.createElement('style');
+          styleTag.id = 'tweakcn-theme';
+          document.head.appendChild(styleTag);
+        }
+        styleTag.textContent = cssVars;
+      } catch (error) {
+        console.error('Failed to apply TweakCN theme:', error);
+      }
+    };
+
+    fetchTheme();
+  }, [themeUrl]);
 }
 
 /**

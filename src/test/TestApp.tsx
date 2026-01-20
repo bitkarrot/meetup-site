@@ -25,7 +25,7 @@ export function TestApp({ children }: TestAppProps) {
     theme: 'light',
     relayMetadata: {
       relays: [
-        { url: import.meta.env.VITE_TEST_RELAY, read: true, write: true },
+        { url: 'wss://relay.damus.io', read: true, write: true },
       ],
       updatedAt: 0,
     },

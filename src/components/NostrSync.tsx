@@ -92,7 +92,8 @@ export function NostrSync() {
             heroTitle: 'hero_title',
             heroSubtitle: 'hero_subtitle',
             heroBackground: 'hero_background',
-            defaultRelay: 'default_relay'
+            defaultRelay: 'default_relay',
+            tweakcnThemeUrl: 'tweakcn_theme_url'
           };
 
           const eventTags = event.tags || [];
