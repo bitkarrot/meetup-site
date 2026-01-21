@@ -137,10 +137,16 @@ export default function AdminLayout() {
                 title="Toggle Theme"
               >
                 {theme === 'dark' ? (
-                  <Sun className="h-4 w-4" />
-                ) : (
-                  <Moon className="h-4 w-4" />
-                )}
+                  <>
+                  <Sun className="h-5 w-5 mr-3" />
+                  <span className="ml-2">Light</span>
+                  </>
+                ) : (<>
+                  <Moon className="h-5 w-5 mr-3" />
+                  <span className="ml-2">Dark</span>
+                  </>)}
+
+
               </Button>
               <Separator orientation="vertical" className="h-6" />
               <LoginArea />

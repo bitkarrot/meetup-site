@@ -101,11 +101,16 @@ export default function Navigation() {
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               >
                 {theme === 'dark' ? (
-                  <Sun className="h-4 w-4" />
+                  <>
+                    <Sun className="h-4 w-4" />
+                    <span className="ml-2">Light</span>
+                  </>
                 ) : (
-                  <Moon className="h-4 w-4" />
+                  <>
+                    <Moon className="h-4 w-4" />
+                    <span className="ml-2">Dark</span>
+                  </>
                 )}
-                <span className="ml-2">Toggle Theme</span>
               </Button>
 
               <LoginArea />
@@ -139,7 +144,7 @@ export default function Navigation() {
             </div>
             <div className="mt-4 pt-4 border-t space-y-4">
               {user && (
-                <Button variant="ghost" size="lg" asChild className="w-full justify-start">
+                <Button variant="ghost" size="lg" asChild className="w-full justify-start text-base font-medium">
                   <Link to="/admin" onClick={() => setMobileMenuOpen(false)}>
                     <Settings className="h-5 w-5 mr-3" />
                     Admin
@@ -147,27 +152,28 @@ export default function Navigation() {
                 </Button>
               )}
               
-              <div className="px-2">
-                <Button
-                  variant="ghost"
-                  size="lg"
-                  className="w-full justify-start text-base font-medium"
-                  onClick={() => {
-                    setTheme(theme === 'dark' ? 'light' : 'dark');
-                    setMobileMenuOpen(false);
-                  }}
-                >
-                  {theme === 'dark' ? (
-                    <Sun className="h-5 w-5 mr-3" />
-                  ) : (
-                    <Moon className="h-5 w-5 mr-3" />
-                  )}
-                  Toggle Theme
-                </Button>
-              </div>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="w-full justify-start text-base font-medium"
+                onClick={() => {
+                  setTheme(theme === 'dark' ? 'light' : 'dark');
+                  setMobileMenuOpen(false);
+                }}
+              >
+                {theme === 'dark' ? (
+                  <>
+                  <Sun className="h-4 w-4" />
+                  <span className="ml-2">Light</span>
+                  </>
+                ) : (<>
+                  <Moon className="h-4 w-4" />
+                  <span className="ml-2">Dark</span>
+                  </>)}
+              </Button>
 
-              <div className="px-2 pt-2">
-                <LoginArea />
+              <div className="pt-2 flex justify-start">
+                <LoginArea className="justify-start w-full" />
               </div>
             </div>
           </div>
