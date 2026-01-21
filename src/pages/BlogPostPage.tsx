@@ -1,59 +1,15 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
-import { useAuthor } from '@/hooks/useAuthor';
 import Navigation from '@/components/Navigation';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Calendar, ArrowLeft, ExternalLink } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Calendar, ArrowLeft } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { nip19 } from 'nostr-tools';
 import { useSeoMeta } from '@unhead/react';
 import { useAppContext } from '@/hooks/useAppContext';
-
-function AuthorInfo({ pubkey }: { pubkey: string }) {
-  const { data: author } = useAuthor(pubkey);
-  
-  let npub = '';
-  try {
-    if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) {
-      npub = nip19.npubEncode(pubkey);
-    }
-  } catch (e) {
-    console.error('Error encoding npub:', e);
-  }
-
-  return (
-    <div className="flex items-center gap-3 py-6 border-y mb-8">
-      <Avatar className="h-10 w-10">
-        <AvatarImage src={author?.metadata?.picture} />
-        <AvatarFallback>{author?.metadata?.name?.charAt(0) || '?'}</AvatarFallback>
-      </Avatar>
-      <div className="flex flex-col">
-        <span className="font-semibold text-sm">
-          {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-        </span>
-        {npub ? (
-          <a 
-            href={`https://nostr.at/${npub}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-muted-foreground hover:underline flex items-center gap-1"
-          >
-            {npub.slice(0, 12)}...{npub.slice(-4)}
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            No public key available
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
+import { AuthorInfo } from '@/components/AuthorInfo';
 
 export default function BlogPostPage() {
   const { postId } = useParams<{ postId: string }>();
@@ -159,7 +115,7 @@ export default function BlogPostPage() {
           </div>
         </header>
 
-        <AuthorInfo pubkey={post.pubkey} />
+        <AuthorInfo pubkey={post.pubkey} size="lg" showNpub={true} className="flex items-center gap-3 py-6 border-y mb-8" />
 
         <div className="prose prose-lg dark:prose-invert max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>

@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useAppContext } from '@/hooks/useAppContext';
 import { ArrowLeft, Calendar, MapPin, Clock } from 'lucide-react';
+import { AuthorInfo } from '@/components/AuthorInfo';
 
 export default function EventPage() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -139,6 +140,7 @@ export default function EventPage() {
             <div className="flex items-start justify-between">
               <div className="space-y-2 flex-1">
                 <h1 className="text-3xl font-bold">{event.title}</h1>
+                <AuthorInfo pubkey={event.author} size="lg" showNpub={true} className="flex items-center gap-3 py-2" />
                 {event.summary && (
                   <p className="text-lg text-muted-foreground">{event.summary}</p>
                 )}

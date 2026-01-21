@@ -10,6 +10,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Edit, Trash2, Calendar, MapPin, Share2, Eye, Layout } from 'lucide-react';
+import { AuthorInfo } from '@/components/AuthorInfo';
 import { useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -513,6 +514,8 @@ export default function AdminEvents() {
                   {event.summary && (
                     <p className="text-sm text-muted-foreground">{event.summary}</p>
                   )}
+                  
+                  <AuthorInfo pubkey={event.pubkey} className="flex items-center gap-2 my-2" />
                   
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     <div className="flex items-center gap-1">

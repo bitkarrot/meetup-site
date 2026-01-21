@@ -12,6 +12,7 @@ import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useAppContext } from '@/hooks/useAppContext';
 import Navigation from '@/components/Navigation';
 import { Calendar, MapPin, Clock, Search, Filter } from 'lucide-react';
+import { AuthorInfo } from '@/components/AuthorInfo';
 
 interface Event {
   id: string;
@@ -23,6 +24,7 @@ interface Event {
   kind: 31922 | 31923;
   status: string;
   image?: string;
+  pubkey: string;
 }
 
 const filterOptions = [
@@ -89,6 +91,7 @@ export default function EventsPage() {
           kind: event.kind as 31922 | 31923,
           status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
           image: tags.find(([name]) => name === 'image')?.[1],
+          pubkey: event.pubkey,
           created_at: event.created_at,
         };
       });
@@ -250,6 +253,7 @@ export default function EventsPage() {
                     )}
                   </CardHeader>
                   <CardContent>
+                    <AuthorInfo pubkey={event.pubkey} />
                     <div className="space-y-2 text-sm text-muted-foreground mb-4">
                       <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4" />

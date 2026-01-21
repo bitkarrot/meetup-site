@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { nip19 } from 'nostr-tools';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,8 +10,7 @@ import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useAppContext } from '@/hooks/useAppContext';
 import Navigation from '@/components/Navigation';
 import { Search, Calendar, Edit } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { useAuthor } from '@/hooks/useAuthor';
+import { AuthorInfo } from '@/components/AuthorInfo';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -24,44 +22,6 @@ interface BlogPost {
   created_at: number;
   image?: string;
   pubkey: string;
-}
-
-function AuthorInfo({ pubkey }: { pubkey: string }) {
-  const { data: author } = useAuthor(pubkey);
-  
-  let npub = '';
-  try {
-    if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) {
-      npub = nip19.npubEncode(pubkey);
-    }
-  } catch (e) {
-    console.error('Error encoding npub:', e);
-  }
-
-  return (
-    <div className="flex items-center gap-2 mb-4">
-      <Avatar className="h-6 w-6">
-        <AvatarImage src={author?.metadata?.picture} />
-        <AvatarFallback>{author?.metadata?.name?.charAt(0) || '?'}</AvatarFallback>
-      </Avatar>
-      <div className="flex flex-col">
-        {npub ? (
-          <a 
-            href={`https://nostr.at/${npub}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs font-medium hover:underline"
-          >
-            {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-          </a>
-        ) : (
-          <span className="text-xs font-medium">
-            {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function BlogPage() {
