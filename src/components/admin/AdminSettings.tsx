@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -599,6 +599,9 @@ export default function AdminSettings() {
       <Card>
         <CardHeader>
           <CardTitle>Site Styling (TweakCN)</CardTitle>
+          <CardDescription>
+            <a href="https://tweakcn.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">TweakCN</a> is a powerful theme engine that allows you to customize the visual appearance of your site using a simple JSON configuration.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -688,7 +691,7 @@ export default function AdminSettings() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Enter a direct link to a TweakCN theme JSON file to apply custom styling.
+              Enter a direct link to a <a href="https://tweakcn.com/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">TweakCN</a> theme JSON file to apply custom styling.
             </p>
           </div>
 
