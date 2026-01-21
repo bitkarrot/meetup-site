@@ -70,6 +70,32 @@ export function NostrSync() {
     const syncSiteConfigFromMaster = async () => {
       try {
         console.log('[NostrSync] Fetching site config from master:', masterPubkey);
+        
+        // Get the current default relay from environment variable
+        const envDefaultRelay = import.meta.env.VITE_DEFAULT_RELAY;
+        
+        // Check if the environment variable relay differs from what's in localStorage
+        const localStoredRelay = config.siteConfig?.defaultRelay;
+        const relayHasChanged = envDefaultRelay && localStoredRelay && envDefaultRelay !== localStoredRelay;
+        
+        if (relayHasChanged) {
+          console.log('[NostrSync] VITE_DEFAULT_RELAY has changed from', localStoredRelay, 'to', envDefaultRelay);
+          console.log('[NostrSync] Skipping relay sync and prioritizing environment variable');
+          
+          // Update config to use the new relay from environment variable
+          updateConfig((current) => ({
+            ...current,
+            siteConfig: {
+              ...current.siteConfig,
+              defaultRelay: envDefaultRelay,
+              updatedAt: Math.floor(Date.now() / 1000),
+            },
+          }));
+
+          hasSyncedConfig.current = true;
+          return;
+        }
+
         const events = await nostr.query(
           [{ 
             kinds: [30078], 
@@ -105,6 +131,18 @@ export function NostrSync() {
 
           const updatedAtTag = eventTags.find(([name]) => name === 'updated_at')?.[1];
           const eventUpdatedAt = updatedAtTag ? parseInt(updatedAtTag) : event.created_at;
+
+          // Check if relay from Nostr event differs from environment variable
+          const relayFromEvent = loadedConfig.defaultRelay as string | undefined;
+          const eventRelayDiffersFromEnv = envDefaultRelay && relayFromEvent && envDefaultRelay !== relayFromEvent;
+          
+          if (eventRelayDiffersFromEnv) {
+            console.log('[NostrSync] Relay in Nostr event', relayFromEvent, 'differs from VITE_DEFAULT_RELAY', envDefaultRelay);
+            console.log('[NostrSync] Prioritizing environment variable over relay data');
+            
+            // Override the relay from the event with the environment variable
+            loadedConfig.defaultRelay = envDefaultRelay;
+          }
 
           // Only update if the event is newer than our current local site config
           if (config.siteConfig?.updatedAt && eventUpdatedAt <= config.siteConfig.updatedAt) {
