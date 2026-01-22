@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
+import { useAuthor } from '@/hooks/useAuthor';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Edit, Trash2, Eye, Layout, Share2, Globe } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Layout, Share2, Globe, User } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -26,6 +28,76 @@ interface StaticPage {
   created_at: number;
   pubkey: string;
   relays: string[];
+}
+
+function PageCard({ page, user, onEdit, onDelete }: {
+  page: StaticPage;
+  user: { pubkey: string } | null;
+  onEdit: (page: StaticPage) => void;
+  onDelete: (page: StaticPage) => void;
+}) {
+  const { data: authorData } = useAuthor(page.pubkey);
+  const metadata = authorData?.metadata;
+  const displayName = metadata?.name || metadata?.display_name || `${page.pubkey.slice(0, 8)}...`;
+
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-start justify-between">
+          <div className="space-y-2 flex-1">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary" />
+              <h3 className="text-lg font-semibold">{page.path}</h3>
+              <Badge variant="outline">Kind 34128</Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <Avatar className="h-6 w-6">
+                <AvatarImage src={metadata?.picture} alt={displayName} />
+                <AvatarFallback><User className="h-3 w-3" /></AvatarFallback>
+              </Avatar>
+              <span className="text-sm text-muted-foreground">{displayName}</span>
+            </div>
+            <p className="text-xs font-mono text-muted-foreground break-all">
+              SHA256: {page.sha256}
+            </p>
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {page.content.replace(/[*#>`]/g, '').slice(0, 200)}...
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Created: {new Date(page.created_at * 1000).toLocaleDateString()}
+            </p>
+            {page.relays && page.relays.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                <span className="text-xs text-muted-foreground mr-1">Published to:</span>
+                {page.relays.map((relay) => (
+                  <Badge key={relay} variant="secondary" className="text-xs font-mono">
+                    {relay.replace('wss://', '').replace('ws://', '')}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 ml-4">
+            <Button variant="ghost" size="sm" asChild title="View Page">
+              <a href={page.path} target="_blank" rel="noopener noreferrer">
+                <Eye className="h-4 w-4" />
+              </a>
+            </Button>
+            {user && page.pubkey === user.pubkey && (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => onEdit(page)}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => onDelete(page)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function AdminPages() {
@@ -300,55 +372,13 @@ export default function AdminPages() {
 
       <div className="space-y-4">
         {pages?.map((page) => (
-          <Card key={page.id}>
-            <CardContent className="pt-6">
-              <div className="flex items-start justify-between">
-                <div className="space-y-2 flex-1">
-                  <div className="flex items-center gap-2">
-                    <Globe className="h-4 w-4 text-primary" />
-                    <h3 className="text-lg font-semibold">{page.path}</h3>
-                    <Badge variant="outline">Kind 34128</Badge>
-                  </div>
-                  <p className="text-xs font-mono text-muted-foreground break-all">
-                    SHA256: {page.sha256}
-                  </p>
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    {page.content.replace(/[*#>`]/g, '').slice(0, 200)}...
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Created: {new Date(page.created_at * 1000).toLocaleDateString()}
-                  </p>
-                  {page.relays && page.relays.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      <span className="text-xs text-muted-foreground mr-1">Published to:</span>
-                      {page.relays.map((relay) => (
-                        <Badge key={relay} variant="secondary" className="text-xs font-mono">
-                          {relay.replace('wss://', '').replace('ws://', '')}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-2 ml-4">
-                  <Button variant="ghost" size="sm" asChild title="View Page">
-                    <a href={page.path} target="_blank" rel="noopener noreferrer">
-                      <Eye className="h-4 w-4" />
-                    </a>
-                  </Button>
-                  {user && page.pubkey === user.pubkey && (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => handleEdit(page)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDelete(page)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <PageCard
+            key={page.id}
+            page={page}
+            user={user}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
         ))}
         
         {(!pages || pages.length === 0) && (
