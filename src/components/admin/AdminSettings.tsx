@@ -17,7 +17,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Save, Plus, Trash2, GripVertical, RefreshCw, ShieldAlert, Eye, AlertCircle, RotateCcw } from 'lucide-react';
+import { Save, Plus, Trash2, GripVertical, RefreshCw, ShieldAlert, Eye, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import {
   DndContext,
@@ -504,31 +504,6 @@ export default function AdminSettings() {
     }
   };
 
-  const handleResetToDefaults = async () => {
-    if (window.confirm('Are you sure you want to reset all settings to defaults? This will clear all local storage, cached data, and DE-CONFIGURE the site from relays (publish a deletion for the remote config). You will be logged out and the site will return to its original environment variable state.')) {
-      try {
-        // Publish deletion event (Kind 5) for the NIP-78 site config
-        await publishEvent({
-          event: {
-            kind: 5,
-            content: "Resetting site configuration to defaults",
-            tags: [
-              ['a', `30078:${masterPubkey}:nostr-meetup-site-config`],
-              ['alt', 'Delete site configuration']
-            ]
-          }
-        });
-        console.log('[handleResetToDefaults] Remote deletion event published');
-      } catch (e) {
-        console.error('[handleResetToDefaults] Failed to delete remote config:', e);
-      }
-
-      localStorage.clear();
-      queryClient.clear();
-      window.location.href = '/';
-    }
-  };
-
   const addNavigationItem = () => {
     if (navigation.length >= 5) {
       toast({
@@ -568,10 +543,6 @@ export default function AdminSettings() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="destructive" onClick={handleResetToDefaults}>
-            <RotateCcw className="h-4 w-4 mr-2" />
-            Reset to Defaults
-          </Button>
           <Button variant="outline" onClick={handleLoadConfig} disabled={isRefreshing || !user}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? 'Refreshing...' : 'Refresh from Relay'}

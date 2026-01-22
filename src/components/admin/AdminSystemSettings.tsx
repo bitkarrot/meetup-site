@@ -306,22 +306,50 @@ export default function AdminSystemSettings() {
   };
 
   const handleResetToDefaults = async () => {
-    if (window.confirm('Are you sure you want to reset all settings to defaults? This will clear all local storage, cached data, and DE-CONFIGURE the site from relays (publish a deletion for the remote config). You will be logged out and the site will return to its original environment variable state.')) {
+    if (window.confirm('Are you sure you want to reset all settings to defaults? This will clear all local storage, cached data, and republish the default configuration to the relay. You will be logged out and the site will return to its original environment variable state.')) {
       try {
-        // Publish deletion event (Kind 5) for the NIP-78 site config
+        // Get default values from environment variables
+        const envDefaultRelay = import.meta.env.VITE_DEFAULT_RELAY;
+        
+        // Publish Kind 30078 with default values (blanked out except for default relay)
+        const defaultConfigTags = [
+          ['d', 'nostr-meetup-site-config'],
+          ['title', 'My Meetup Site'],
+          ['logo', ''],
+          ['favicon', ''],
+          ['og_image', ''],
+          ['hero_title', 'Welcome to Our Community'],
+          ['hero_subtitle', 'Join us for amazing meetups and events'],
+          ['hero_background', 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop'],
+          ['show_events', 'true'],
+          ['show_blog', 'true'],
+          ['max_events', '6'],
+          ['max_blog_posts', '3'],
+          ['default_relay', envDefaultRelay],
+          ['publish_relays', JSON.stringify([envDefaultRelay])],
+          ['admin_roles', JSON.stringify({})],
+          ['tweakcn_theme_url', ''],
+          ['updated_at', Math.floor(Date.now() / 1000).toString()],
+        ];
+
         await publishEvent({
           event: {
-            kind: 5,
-            content: "Resetting site configuration to defaults",
-            tags: [
-              ['a', `30078:${masterPubkey}:nostr-meetup-site-config`],
-              ['alt', 'Delete site configuration']
-            ]
+            kind: 30078,
+            content: JSON.stringify({ 
+              navigation: [
+                { id: '1', name: 'Home', href: '/', isSubmenu: false },
+                { id: '2', name: 'Events', href: '/events', isSubmenu: false },
+                { id: '3', name: 'Blog', href: '/blog', isSubmenu: false },
+                { id: '4', name: 'About', href: '/about', isSubmenu: false },
+                { id: '5', name: 'Contact', href: '/contact', isSubmenu: false },
+              ]
+            }),
+            tags: defaultConfigTags,
           }
         });
-        console.log('[handleResetToDefaults] Remote deletion event published');
+        console.log('[handleResetToDefaults] Default configuration republished to relay');
       } catch (e) {
-        console.error('[handleResetToDefaults] Failed to delete remote config:', e);
+        console.error('[handleResetToDefaults] Failed to republish default config:', e);
       }
 
       localStorage.clear();

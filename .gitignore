@@ -32,3 +32,4 @@ yarn.lock
 .env.*
 !.env.example
 .env*.local
+.trunk
