@@ -15,6 +15,7 @@ VITE_DEFAULT_RELAY=
 
 # Master pubkey (owner of the site)
 VITE_MASTER_PUBKEY=
+```
 
 A comprehensive meetup and event management system built with React, TypeScript, and Nostr. This project provides both an admin CMS for content management and a public-facing website for community engagement.
 
