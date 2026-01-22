@@ -32,11 +32,14 @@ export default function BlogPostPage() {
       const authorPubkey = event.pubkey.toLowerCase().trim();
       if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'primary') return null;
 
+      const published = event.tags.find(([name]) => name === 'published')?.[1] !== 'false';
+      if (!published) return null;
+
       return {
         id: event.id,
         title: event.tags.find(([name]) => name === 'title')?.[1] || 'Untitled',
         content: event.content,
-        published: event.tags.find(([name]) => name === 'published')?.[1] === 'true' || !event.tags.find(([name]) => name === 'published'),
+        published,
         created_at: event.created_at,
         pubkey: event.pubkey,
         image: event.tags.find(([name]) => name === 'image')?.[1],

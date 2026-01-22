@@ -55,19 +55,21 @@ export default function Navigation() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-2">
-            {configNavigation.map((item) => (
-              <Button
-                key={item.id}
-                variant="ghost"
-                size="sm"
-                asChild
-                className={isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'}
-              >
-                <Link to={item.href}>
-                  {item.name}
-                </Link>
-              </Button>
-            ))}
+            {configNavigation.length <= 5 ? (
+              configNavigation.map((item) => (
+                <Button
+                  key={item.id}
+                  variant="ghost"
+                  size="sm"
+                  asChild
+                  className={isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'}
+                >
+                  <Link to={item.href}>
+                    {item.name}
+                  </Link>
+                </Button>
+              ))
+            ) : null}
           </div>
 
           {/* Right side items */}
@@ -75,7 +77,7 @@ export default function Navigation() {
             <Button
               variant="ghost"
               size="sm"
-              className="md:hidden"
+              className={cn(configNavigation.length <= 5 && "md:hidden")}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
               {mobileMenuOpen ? (
@@ -118,9 +120,9 @@ export default function Navigation() {
           </div>
         </div>
 
-        {/* Mobile Navigation */}
+        {/* Mobile/Hamburger Navigation */}
         {mobileMenuOpen && (
-          <div className="md:hidden py-4 border-t">
+          <div className={cn("py-4 border-t", configNavigation.length <= 5 && "md:hidden")}>
             <div className="flex flex-col space-y-1">
               {configNavigation.map((item) => (
                 <Button

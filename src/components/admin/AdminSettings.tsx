@@ -505,15 +505,6 @@ export default function AdminSettings() {
   };
 
   const addNavigationItem = () => {
-    if (navigation.length >= 5) {
-      toast({
-        title: "Limit Reached",
-        description: "You can only have up to 5 navigation items at the top level.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     const newItem: NavigationItem = {
       id: Date.now().toString(),
       name: 'New Item',

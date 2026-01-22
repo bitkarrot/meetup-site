@@ -347,11 +347,11 @@ const Index = () => {
         .filter(event => {
           const authorPubkey = event.pubkey.toLowerCase().trim();
           // Always show if author is the master user
-          if (authorPubkey === masterPubkey) return true;
-
-          const role = adminRoles[authorPubkey];
-          // Only show if author is a primary admin
-          return role === 'primary';
+          if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'primary') return false;
+          
+          // Double check: don't show Kind 30023 if it's explicitly marked as NOT published
+          const isPublished = event.tags.find(([name]) => name === 'published')?.[1] !== 'false';
+          return isPublished;
         })
         .map(event => ({
         id: event.id,

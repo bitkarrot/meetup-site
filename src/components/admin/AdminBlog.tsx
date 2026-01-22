@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
-import { useRemoteNostrJson } from '@/hooks/useRemoteNostrJson';
+import { useToast } from '@/hooks/useToast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Edit, Trash2, Eye, Layout, Share2, Search } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useQuery } from '@tanstack/react-query';
+import type { NostrFilter } from '@nostrify/nostrify';
 
 interface BlogPost {
   id: string;
@@ -28,6 +29,7 @@ interface BlogPost {
   created_at: number;
   d: string;
   pubkey: string;
+  kind: number;
 }
 
 function AuthorInfo({ pubkey }: { pubkey: string }) {
@@ -68,7 +70,7 @@ function AuthorInfo({ pubkey }: { pubkey: string }) {
 
 function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
   post: BlogPost;
-  user: { pubkey: string } | null;
+  user: { pubkey: string } | undefined;
   usernameSearch: string;
   onEdit: (post: BlogPost) => void;
   onDelete: (post: BlogPost) => void;
@@ -92,6 +94,9 @@ function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
               <h3 className="text-lg font-semibold">{post.title}</h3>
               <Badge variant={post.published ? 'default' : 'secondary'}>
                 {post.published ? 'Published' : 'Draft'}
+              </Badge>
+              <Badge variant="outline" className="text-[10px] font-mono">
+                Kind {post.kind}
               </Badge>
             </div>
             <AuthorInfo pubkey={post.pubkey} />
@@ -123,8 +128,8 @@ function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
 export default function AdminBlog() {
   const { nostr, publishRelays: initialPublishRelays } = useDefaultRelay();
   const { user } = useCurrentUser();
-  const { mutate: publishEvent } = useNostrPublish();
-  const { data: remoteNostrJson } = useRemoteNostrJson();
+  const { mutateAsync: publishEvent } = useNostrPublish();
+  const { toast } = useToast();
   const [isCreating, setIsCreating] = useState(false);
   const [editingPost, setEditingPost] = useState<BlogPost | null>(null);
   const [selectedRelays, setSelectedRelays] = useState<string[]>([]);
@@ -144,26 +149,91 @@ export default function AdminBlog() {
 
   // Fetch blog posts
   const { data: allPosts, refetch } = useQuery({
-    queryKey: ['admin-blog-posts'],
+    queryKey: ['admin-blog-posts', user?.pubkey],
     queryFn: async () => {
-      const signal = AbortSignal.timeout(2000);
-      const events = await nostr.query([
-        { kinds: [30023], limit: 100 }
-      ], { signal });
+      const signal = AbortSignal.timeout(5000);
+      const filters: NostrFilter[] = [{ kinds: [30023], limit: 100 }];
       
-      return events.map(event => {
+      // If user is logged in, also fetch their private drafts (Kind 31234)
+      if (user?.pubkey) {
+        filters.push({ kinds: [31234], authors: [user.pubkey], limit: 50 });
+      }
+
+      const events = await nostr.query(filters, { signal });
+      
+      const processedPosts = await Promise.all(events.map(async (event) => {
         const tags = event.tags || [];
+        let content = event.content;
+        let title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
+        let published = tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published');
+        let d = tags.find(([name]) => name === 'd')?.[1] || event.id;
+
+        // Handle Kind 31234 (NIP-37 Draft Wraps)
+        if (event.kind === 31234) {
+          published = false;
+          try {
+            if (user?.signer?.nip44) {
+              const decrypted = await user.signer.nip44.decrypt(user.pubkey, event.content);
+              const draftEvent = JSON.parse(decrypted);
+              content = draftEvent.content || '';
+              const draftTags = draftEvent.tags || [];
+              title = draftTags.find(([name]: string[]) => name === 'title')?.[1] || title;
+              d = draftTags.find(([name]: string[]) => name === 'd')?.[1] || d;
+            } else if (user?.signer?.nip04) {
+              const decrypted = await user.signer.nip04.decrypt(user.pubkey, event.content);
+              const draftEvent = JSON.parse(decrypted);
+              content = draftEvent.content || '';
+              const draftTags = draftEvent.tags || [];
+              title = draftTags.find(([name]: string[]) => name === 'title')?.[1] || title;
+              d = draftTags.find(([name]: string[]) => name === 'd')?.[1] || d;
+            } else {
+              // Try to parse as unencrypted JSON if no decryption available
+              try {
+                const draftEvent = JSON.parse(event.content);
+                content = draftEvent.content || '';
+                const draftTags = draftEvent.tags || [];
+                title = draftTags.find(([name]: string[]) => name === 'title')?.[1] || title;
+                d = draftTags.find(([name]: string[]) => name === 'd')?.[1] || d;
+              } catch {
+                content = "[Encrypted Draft]";
+              }
+            }
+          } catch (e) {
+            console.error('Failed to decrypt draft:', e);
+            content = "[Decryption Failed]";
+          }
+        }
+
         return {
           id: event.id,
-          title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled',
-          content: event.content,
-          published: tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published'),
+          title,
+          content,
+          published,
           created_at: event.created_at,
-          d: tags.find(([name]) => name === 'd')?.[1] || event.id,
+          d,
           pubkey: event.pubkey,
+          kind: event.kind,
         };
-      });
+      }));
+
+      // Deduplicate by d-tag, preferring Kind 31234 or newer events
+      const deduped = processedPosts.reduce((acc: BlogPost[], post) => {
+        const existingIndex = acc.findIndex(p => p.d === post.d && p.pubkey === post.pubkey);
+        if (existingIndex === -1) {
+          acc.push(post);
+        } else {
+          const existing = acc[existingIndex];
+          // Prefer 31234 (private draft) over 30023 if same d-tag, or newer event
+          if (post.kind === 31234 || post.created_at > existing.created_at) {
+            acc[existingIndex] = post;
+          }
+        }
+        return acc;
+      }, []);
+
+      return deduped.sort((a, b) => b.created_at - a.created_at);
     },
+    enabled: !!nostr,
   });
 
   // Note: We'll filter posts client-side based on author metadata in the render
@@ -171,53 +241,128 @@ export default function AdminBlog() {
   // consider using a separate component with useAuthor for each post
   const posts = allPosts;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !formData.title.trim() || !formData.content.trim()) return;
 
     if (editingPost && editingPost.pubkey !== user.pubkey) {
-      alert("You cannot edit another user's post.");
+      toast({
+        title: "Error",
+        description: "You cannot edit another user's post.",
+        variant: "destructive"
+      });
       return;
     }
 
-    const tags = [
-      ['d', editingPost?.d || `blog-${Date.now()}`],
-      ['title', formData.title],
-      ['published', formData.published.toString()],
-    ];
+    try {
+      const dTag = editingPost?.d || `blog-${Date.now()}`;
+      const tags = [
+        ['d', dTag],
+        ['title', formData.title],
+        ['published', formData.published.toString()],
+      ];
 
-    if (editingPost) {
-      // Update existing post
-      publishEvent({
-        event: {
+      if (formData.published) {
+        console.log('Publishing as Kind 30023');
+        // Publish as Kind 30023 (Long-form Content)
+        await publishEvent({
+          event: {
+            kind: 30023,
+            content: formData.content,
+            tags: [
+              ...tags,
+              ['published_at', Math.floor(Date.now() / 1000).toString()]
+            ],
+          },
+          relays: selectedRelays,
+        });
+
+        // If we were editing a private draft, delete it
+        if (editingPost && editingPost.kind === 31234) {
+          await publishEvent({
+            event: {
+              kind: 5,
+              tags: [
+                ['e', editingPost.id],
+                ['a', `31234:${user.pubkey}:${editingPost.d}`]
+              ],
+            },
+            relays: selectedRelays,
+          });
+        }
+        
+        toast({ title: "Success", description: "Post published successfully." });
+      } else {
+        console.log('Saving as Kind 31234 Draft');
+        // Save as Kind 31234 (NIP-37 Draft Wrap) for privacy
+        const draftEvent = {
           kind: 30023,
           content: formData.content,
           tags,
-        },
-        relays: selectedRelays,
-      });
-    } else {
-      // Create new post
-      publishEvent({
-        event: {
-          kind: 30023,
-          content: formData.content,
-          tags,
-        },
-        relays: selectedRelays,
+          created_at: Math.floor(Date.now() / 1000),
+        };
+
+        let encryptedContent: string;
+        if (user.signer.nip44) {
+          encryptedContent = await user.signer.nip44.encrypt(user.pubkey, JSON.stringify(draftEvent));
+        } else if (user.signer.nip04) {
+          encryptedContent = await user.signer.nip04.encrypt(user.pubkey, JSON.stringify(draftEvent));
+        } else {
+          encryptedContent = JSON.stringify(draftEvent);
+        }
+
+        await publishEvent({
+          event: {
+            kind: 31234,
+            content: encryptedContent,
+            tags: [
+              ['d', dTag],
+              ['k', '30023'],
+            ],
+          },
+          relays: selectedRelays,
+        });
+
+        // If we were editing a published post, delete it
+        if (editingPost && editingPost.kind === 30023) {
+          await publishEvent({
+            event: {
+              kind: 5,
+              tags: [
+                ['e', editingPost.id],
+                ['a', `30023:${user.pubkey}:${editingPost.d}`]
+              ],
+            },
+            relays: selectedRelays,
+          });
+        }
+        
+        toast({ title: "Success", description: "Draft saved privately." });
+      }
+
+      // Reset form
+      setFormData({ title: '', content: '', published: false });
+      setIsCreating(false);
+      setEditingPost(null);
+      refetch();
+    } catch (error: unknown) {
+      console.error('Submit failed:', error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to save post.";
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive"
       });
     }
-
-    // Reset form
-    setFormData({ title: '', content: '', published: false });
-    setIsCreating(false);
-    setEditingPost(null);
-    refetch();
   };
 
   const handleEdit = (post: BlogPost) => {
     if (user && post.pubkey !== user.pubkey) {
-      alert("You cannot edit another user's post.");
+      toast({
+        title: "Error",
+        description: "You cannot edit another user's post.",
+        variant: "destructive"
+      });
       return;
     }
     setFormData({
@@ -229,21 +374,40 @@ export default function AdminBlog() {
     setIsCreating(true);
   };
 
-  const handleDelete = (post: BlogPost) => {
+  const handleDelete = async (post: BlogPost) => {
     if (user && post.pubkey !== user.pubkey) {
-      alert("You cannot delete another user's post.");
+      toast({
+        title: "Error",
+        description: "You cannot delete another user's post.",
+        variant: "destructive"
+      });
       return;
     }
     if (confirm('Are you sure you want to delete this post?')) {
-      // Create a deletion event (kind 5)
-      publishEvent({
-        event: {
-          kind: 5,
-          tags: [['e', post.id]],
-        },
-        relays: selectedRelays,
-      });
-      refetch();
+      try {
+        // Create a deletion event (kind 5)
+        // For replaceable events, we should use both e and a tags
+        await publishEvent({
+          event: {
+            kind: 5,
+            tags: [
+              ['e', post.id],
+              ['a', `${post.kind}:${post.pubkey}:${post.d}`]
+            ],
+          },
+          relays: selectedRelays,
+        });
+        toast({ title: "Success", description: "Post deleted successfully." });
+        refetch();
+      } catch (error: unknown) {
+        console.error('Delete failed:', error);
+        const errorMessage = error instanceof Error ? error.message : "Failed to delete post.";
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive"
+        });
+      }
     }
   };
 

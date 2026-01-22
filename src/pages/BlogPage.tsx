@@ -43,8 +43,11 @@ export default function BlogPage() {
       return postList
         .filter(event => {
           const authorPubkey = event.pubkey.toLowerCase().trim();
-          if (authorPubkey === masterPubkey) return true;
-          return adminRoles[authorPubkey] === 'primary';
+          if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'primary') return false;
+          
+          // Double check: don't show Kind 30023 if it's explicitly marked as NOT published
+          const isPublished = event.tags.find(([name]) => name === 'published')?.[1] !== 'false';
+          return isPublished;
         })
         .map(event => ({
         id: event.id,

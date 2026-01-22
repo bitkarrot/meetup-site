@@ -3,20 +3,27 @@ import { Badge } from '@/components/ui/badge';
 import { FileText, Calendar } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import type { NostrFilter } from '@nostrify/nostrify';
 
 export default function AdminDashboard() {
   const { nostr } = useDefaultRelay();
 
-  // Fetch blog posts (kind 30023 - Long-form content)
+  const { user } = useCurrentUser();
   const { data: blogPosts } = useQuery({
-    queryKey: ['admin-blog-posts'],
+    queryKey: ['admin-blog-posts', user?.pubkey],
     queryFn: async () => {
       const signal = AbortSignal.timeout(2000);
-      const events = await nostr.query([
-        { kinds: [30023], limit: 50 }
-      ], { signal });
+      const filters: NostrFilter[] = [{ kinds: [30023], limit: 50 }];
+      
+      if (user?.pubkey) {
+        filters.push({ kinds: [31234], authors: [user.pubkey], limit: 20 });
+      }
+
+      const events = await nostr.query(filters, { signal });
       return events;
     },
+    enabled: !!nostr,
   });
 
   // Fetch events (kind 31922/31923 - Calendar events)
@@ -86,9 +93,16 @@ export default function AdminDashboard() {
             <div className="space-y-4">
               {blogPosts?.slice(0, 5).map((post) => {
                 const tags = post.tags || [];
-                const title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
-                const published = tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published');
+                let title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
+                let published = tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published');
                 
+                if (post.kind === 31234) {
+                  published = false;
+                  title = '[Private Draft]';
+                  // Note: We're not decrypting here for simplicity in the dashboard list
+                  // But we show that it is a private draft
+                }
+
                 return (
                   <div key={post.id} className="flex items-center justify-between">
                     <div className="space-y-1">
@@ -99,9 +113,14 @@ export default function AdminDashboard() {
                         {new Date(post.created_at * 1000).toLocaleDateString()}
                       </p>
                     </div>
-                    <Badge variant={published ? 'default' : 'secondary'}>
-                      {published ? 'Published' : 'Draft'}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        Kind {post.kind}
+                      </Badge>
+                      <Badge variant={published ? 'default' : 'secondary'}>
+                        {published ? 'Published' : 'Draft'}
+                      </Badge>
+                    </div>
                   </div>
                 );
               })}
