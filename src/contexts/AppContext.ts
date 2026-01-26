@@ -44,6 +44,7 @@ export interface AppConfig {
     name: string;
     href: string;
     isSubmenu: boolean;
+    isLabelOnly?: boolean;
     parentId?: string;
   }>;
 }

@@ -2,13 +2,22 @@ import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAppContext } from '@/hooks/useAppContext';
+import { type AppConfig } from '@/contexts/AppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useTheme } from '@/hooks/useTheme';
 import { LoginArea } from '@/components/auth/LoginArea';
-import { Settings, Menu, X, Moon, Sun } from 'lucide-react';
+import { Settings, Menu, X, Moon, Sun, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-const defaultNavigation = [
+type NavigationItem = NonNullable<AppConfig['navigation']>[number];
+
+const defaultNavigation: NavigationItem[] = [
   { id: 'home', name: 'Home', href: '/', isSubmenu: false },
   { id: 'events', name: 'Events', href: '/events', isSubmenu: false },
   { id: 'blog', name: 'Blog', href: '/blog', isSubmenu: false },
@@ -25,6 +34,8 @@ export default function Navigation() {
 
   const siteConfig = config.siteConfig;
   const configNavigation = Array.isArray(config.navigation) ? config.navigation : defaultNavigation;
+  const mainItems = configNavigation.filter(item => !item.parentId);
+  const showHamburger = mainItems.length > 4;
 
   const isActivePath = (href: string) => {
     if (href === '/') {
@@ -54,9 +65,48 @@ export default function Navigation() {
           </div>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-2">
-            {configNavigation.length <= 5 ? (
-              configNavigation.map((item) => (
+          <div className={cn("hidden md:flex items-center space-x-2", showHamburger && "md:hidden")}>
+            {mainItems.map((item) => {
+              const children = configNavigation.filter(c => c.parentId === item.id);
+              const hasChildren = children.length > 0;
+
+              if (hasChildren) {
+                return (
+                  <DropdownMenu key={item.id}>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          "gap-1",
+                          isActivePath(item.href) ? 'text-primary' : 'text-muted-foreground'
+                        )}
+                      >
+                        {item.name}
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {!item.isLabelOnly && (
+                        <DropdownMenuItem asChild>
+                          <Link to={item.href} className="w-full">
+                            {item.name} (Overview)
+                          </Link>
+                        </DropdownMenuItem>
+                      )}
+                      {children.map(child => (
+                        <DropdownMenuItem key={child.id} asChild>
+                          <Link to={child.href} className="w-full">
+                            {child.name}
+                          </Link>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                );
+              }
+
+              return (
                 <Button
                   key={item.id}
                   variant="ghost"
@@ -68,8 +118,8 @@ export default function Navigation() {
                     {item.name}
                   </Link>
                 </Button>
-              ))
-            ) : null}
+              );
+            })}
           </div>
 
           {/* Right side items */}
@@ -77,7 +127,7 @@ export default function Navigation() {
             <Button
               variant="ghost"
               size="sm"
-              className={cn(configNavigation.length <= 5 && "md:hidden")}
+              className={cn(!showHamburger && "md:hidden")}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
               {mobileMenuOpen ? (
@@ -122,27 +172,67 @@ export default function Navigation() {
 
         {/* Mobile/Hamburger Navigation */}
         {mobileMenuOpen && (
-          <div className={cn("py-4 border-t", configNavigation.length <= 5 && "md:hidden")}>
+          <div className={cn("py-4 border-t")}>
             <div className="flex flex-col space-y-1">
-              {configNavigation.map((item) => (
-                <Button
-                  key={item.id}
-                  variant="ghost"
-                  size="lg"
-                  asChild
-                  className={cn(
-                    "w-full justify-start text-base font-medium",
-                    isActivePath(item.href) ? 'text-primary bg-primary/10' : 'text-muted-foreground'
-                  )}
-                >
-                  <Link
-                    to={item.href}
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    {item.name}
-                  </Link>
-                </Button>
-              ))}
+              {configNavigation.filter(item => !item.parentId).map((item) => {
+                const children = configNavigation.filter(c => c.parentId === item.id);
+                const hasChildren = children.length > 0;
+
+                return (
+                  <div key={item.id} className="flex flex-col">
+                    {item.isLabelOnly ? (
+                      <Button
+                        variant="ghost"
+                        size="lg"
+                        asChild
+                        className="w-full justify-start text-base font-semibold text-muted-foreground hover:bg-transparent cursor-default"
+                      >
+                        <div>{item.name}</div>
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="lg"
+                        asChild
+                        className={cn(
+                          "w-full justify-start text-base font-medium",
+                          isActivePath(item.href) ? 'text-primary bg-primary/10' : 'text-muted-foreground'
+                        )}
+                      >
+                        <Link
+                          to={item.href}
+                          onClick={() => setMobileMenuOpen(false)}
+                        >
+                          {item.name}
+                        </Link>
+                      </Button>
+                    )}
+                    {hasChildren && (
+                      <div className="ml-4 flex flex-col space-y-1 border-l pl-4 mt-1">
+                        {children.map(child => (
+                          <Button
+                            key={child.id}
+                            variant="ghost"
+                            size="sm"
+                            asChild
+                            className={cn(
+                              "w-full justify-start text-sm font-medium",
+                              isActivePath(child.href) ? 'text-primary bg-primary/10' : 'text-muted-foreground'
+                            )}
+                          >
+                            <Link
+                              to={child.href}
+                              onClick={() => setMobileMenuOpen(false)}
+                            >
+                              {child.name}
+                            </Link>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div className="mt-4 pt-4 border-t space-y-4">
               {user && (

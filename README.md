@@ -1,4 +1,4 @@
-# Meetup Site - Nostr-Powered CMS
+# Meetup or Small Organization Site - Nostr-Powered CMS
 
 Deploy with Vercel 
 
@@ -17,7 +17,7 @@ VITE_DEFAULT_RELAY=
 VITE_MASTER_PUBKEY=
 ```
 
-A comprehensive meetup and event management system built with React, TypeScript, and Nostr. This project provides both an admin CMS for content management and a public-facing website for community engagement.
+A comprehensive meetup or small organization and event management system built with React, TypeScript, and Nostr. This project provides both an admin CMS for content management and a public-facing website for community engagement.
 
 ## Features
 

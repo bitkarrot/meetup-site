@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Save, Plus, Trash2, GripVertical, RefreshCw, ShieldAlert, Eye, AlertCircle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import {
   DndContext,
@@ -42,6 +43,7 @@ interface NavigationItem {
   name: string;
   href: string;
   isSubmenu: boolean;
+  isLabelOnly?: boolean;
   parentId?: string;
 }
 
@@ -75,52 +77,106 @@ const TWEAKCN_THEMES = [
 
 interface SortableNavItemProps {
   item: NavigationItem;
+  navigation: NavigationItem[];
   onUpdate: (id: string, updates: Partial<NavigationItem>) => void;
   onRemove: (id: string) => void;
 }
 
-function SortableNavItem({ item, onUpdate, onRemove }: SortableNavItemProps) {
+function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavItemProps) {
   const {
     attributes,
     listeners,
     setNodeRef,
     transform,
     transition,
+    isDragging,
   } = useSortable({ id: item.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+    opacity: isDragging ? 0.5 : 1,
   };
+
+  const parentItems = navigation.filter(n => !n.parentId && n.id !== item.id);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 p-3 border rounded-md bg-card"
+      className={cn(
+        "flex flex-col gap-2 p-3 border rounded-md bg-card",
+        item.parentId && "ml-8 border-l-4 border-l-primary/30"
+      )}
     >
-      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
-        <GripVertical className="h-4 w-4 text-muted-foreground" />
+      <div className="flex items-center gap-2">
+        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+          <GripVertical className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2">
+          <Input
+            value={item.name}
+            onChange={(e) => onUpdate(item.id, { name: e.target.value })}
+            placeholder="Name"
+          />
+          {!item.isLabelOnly ? (
+            <Input
+              value={item.href}
+              onChange={(e) => onUpdate(item.id, { href: e.target.value })}
+              placeholder="/path"
+            />
+          ) : (
+            <div className="flex items-center px-3 text-sm text-muted-foreground italic border rounded-md bg-muted/50 h-10">
+              No link (Label Only)
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-4 px-2">
+          {!item.parentId && (
+            <div className="flex items-center gap-2">
+              <Label htmlFor={`label-only-${item.id}`} className="text-xs text-muted-foreground whitespace-nowrap">Label Only</Label>
+              <Switch
+                id={`label-only-${item.id}`}
+                checked={item.isLabelOnly}
+                onCheckedChange={(checked) => onUpdate(item.id, { isLabelOnly: checked })}
+              />
+            </div>
+          )}
+          {!item.parentId && (
+            <Select
+              value={item.parentId || "none"}
+              onValueChange={(val) => onUpdate(item.id, { parentId: val === "none" ? undefined : val })}
+            >
+              <SelectTrigger className="w-[140px] h-9">
+                <SelectValue placeholder="No parent" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Main Menu</SelectItem>
+                {parentItems.map(p => (
+                  <SelectItem key={p.id} value={p.id}>Child of {p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {item.parentId && (
+             <Button
+               variant="ghost"
+               size="sm"
+               onClick={() => onUpdate(item.id, { parentId: undefined })}
+               title="Move to root"
+             >
+               <Plus className="h-4 w-4 rotate-45" />
+             </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onRemove(item.id)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2">
-        <Input
-          value={item.name}
-          onChange={(e) => onUpdate(item.id, { name: e.target.value })}
-          placeholder="Name"
-        />
-        <Input
-          value={item.href}
-          onChange={(e) => onUpdate(item.id, { href: e.target.value })}
-          placeholder="/path"
-        />
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => onRemove(item.id)}
-      >
-        <Trash2 className="h-4 w-4" />
-      </Button>
     </div>
   );
 }
@@ -822,6 +878,7 @@ export default function AdminSettings() {
                   <SortableNavItem
                     key={item.id}
                     item={item}
+                    navigation={navigation}
                     onUpdate={updateNavigationItem}
                     onRemove={removeNavigationItem}
                   />

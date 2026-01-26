@@ -49,6 +49,7 @@ const AppConfigSchema = z.object({
     name: z.string(),
     href: z.string(),
     isSubmenu: z.boolean(),
+    isLabelOnly: z.boolean().optional(),
     parentId: z.string().optional(),
   })).optional(),
 }) satisfies z.ZodType<AppConfig>;
