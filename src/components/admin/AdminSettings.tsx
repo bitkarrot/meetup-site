@@ -765,7 +765,8 @@ export default function AdminSettings() {
                               <SelectContent>
                                 <SelectItem value="https://nostr.at">nostr.at</SelectItem>
                                 <SelectItem value="https://njump.me">njump.me</SelectItem>
-                                <SelectItem value="https://habla.news">habla.news</SelectItem>
+                                <SelectItem value="https://nostr.ae">nostr.ae</SelectItem>
+                                <SelectItem value="https://nostr.eu">nostr.eu</SelectItem>
                                 <SelectItem value="https://primal.net">primal.net</SelectItem>
                               </SelectContent>
                             </Select>

@@ -8,7 +8,9 @@ import {
   Heart, 
   Bookmark, 
   MoreHorizontal,
-  Share2
+  Share2,
+  Copy,
+  Code
 } from 'lucide-react';
 
 import { useAuthor } from '@/hooks/useAuthor';
@@ -29,6 +31,12 @@ import {
 import { Card, CardContent, CardFooter, CardHeader } from './ui/card';
 import { CommentForm } from './comments/CommentForm';
 import { useToast } from '@/hooks/useToast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 
 interface FeedItemProps {
   event: NostrEvent;
@@ -42,6 +50,7 @@ export function FeedItem({ event, showActions = true }: FeedItemProps) {
   const { toast } = useToast();
   const author = useAuthor(event.pubkey);
   const [showReplyForm, setShowReplyForm] = useState(false);
+  const [showRawEvent, setShowRawEvent] = useState(false);
   
   const metadata = author.data?.metadata;
   const displayName = metadata?.name || metadata?.display_name || genUserName(event.pubkey);
@@ -119,6 +128,14 @@ export function FeedItem({ event, showActions = true }: FeedItemProps) {
     });
   };
 
+  const handleCopyEventId = () => {
+    navigator.clipboard.writeText(event.id);
+    toast({
+      title: "Event ID Copied",
+      description: "Event ID copied to clipboard."
+    });
+  };
+
   return (
     <Card className="overflow-hidden border-none sm:border shadow-none sm:shadow-sm bg-card mb-4">
       <CardHeader className="p-4 flex flex-row items-start justify-between space-y-0">
@@ -150,6 +167,14 @@ export function FeedItem({ event, showActions = true }: FeedItemProps) {
               <Share2 className="mr-2 h-4 w-4" />
               Copy Link
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleCopyEventId}>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy Event ID
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShowRawEvent(true)}>
+              <Code className="mr-2 h-4 w-4" />
+              View raw event
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={handleBookmark}>
               <Bookmark className="mr-2 h-4 w-4" />
               Bookmark
@@ -157,6 +182,32 @@ export function FeedItem({ event, showActions = true }: FeedItemProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </CardHeader>
+
+      <Dialog open={showRawEvent} onOpenChange={setShowRawEvent}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Raw event</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+                toast({
+                  title: "Copied",
+                  description: "Raw event JSON copied to clipboard."
+                });
+              }}
+            >
+              Copy JSON
+            </Button>
+            <pre className="max-h-[60vh] overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
+              {JSON.stringify(event, null, 2)}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <CardContent className="px-4 pb-4 pt-0">
         <NoteContent event={event} className="text-base" />
