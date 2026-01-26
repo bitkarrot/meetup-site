@@ -58,7 +58,7 @@ export default function AdminDashboard() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
         <p className="text-muted-foreground">
-          Welcome to your meetup site admin panel. Here's an overview of your content.
+          Welcome to your site admin panel. Here's an overview of your content.
         </p>
       </div>
 

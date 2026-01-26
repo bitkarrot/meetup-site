@@ -659,7 +659,7 @@ export default function AdminSettings() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Site Settings</h2>
           <p className="text-muted-foreground">
-            Configure your meetup site appearance and navigation.
+            Configure your site appearance and navigation.
           </p>
         </div>
         <div className="flex gap-2">

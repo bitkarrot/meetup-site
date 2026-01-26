@@ -365,7 +365,7 @@ export default function AdminEvents() {
         <div className="flex-1">
           <h2 className="text-2xl font-bold tracking-tight">Events</h2>
           <p className="text-muted-foreground">
-            Manage meetup events and RSVPs.
+            Manage events and RSVPs.
           </p>
           <div className="mt-3 max-w-sm">
             <div className="relative">
