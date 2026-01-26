@@ -41,7 +41,10 @@ export function AppRouter() {
         <Route path="/blog/:postId" element={<BlogPostPage />} />
         <Route path="/feed" element={<FeedPage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
-        <Route path="/:nip19" element={<NIP19Page />} />
+        <Route
+          path="/:nip19(npub1[a-z0-9]+|nprofile1[a-z0-9]+|note1[a-z0-9]+|nevent1[a-z0-9]+|naddr1[a-z0-9]+)"
+          element={<NIP19Page />}
+        />
         {/* Static pages (about, contact, etc.) */}
         <Route path="/about" element={<StaticPage pathOverride="/about" />} />
         <Route path="/contact" element={<StaticPage pathOverride="/contact" />} />

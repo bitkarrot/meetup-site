@@ -14,6 +14,7 @@ import {
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useAppContext } from '@/hooks/useAppContext';
 import { genUserName } from '@/lib/genUserName';
 import { NoteContent } from './NoteContent';
 import { ZapButton } from './ZapButton';
@@ -37,6 +38,7 @@ interface FeedItemProps {
 export function FeedItem({ event, showActions = true }: FeedItemProps) {
   const { user } = useCurrentUser();
   const { mutate: publishEvent } = useNostrPublish();
+  const { config } = useAppContext();
   const { toast } = useToast();
   const author = useAuthor(event.pubkey);
   const [showReplyForm, setShowReplyForm] = useState(false);
@@ -107,7 +109,9 @@ export function FeedItem({ event, showActions = true }: FeedItemProps) {
 
   const handleShare = () => {
     const noteId = nip19.noteEncode(event.id);
-    const url = `${window.location.origin}/${noteId}`;
+    const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
+    const cleanGateway = gateway.endsWith('/') ? gateway.slice(0, -1) : gateway;
+    const url = `${cleanGateway}/${noteId}`;
     navigator.clipboard.writeText(url);
     toast({
       title: "Link Copied",

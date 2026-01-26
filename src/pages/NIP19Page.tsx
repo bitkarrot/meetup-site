@@ -3,27 +3,35 @@ import { useParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAppContext } from '@/hooks/useAppContext';
 import NotFound from './NotFound';
+import StaticPage from './StaticPage';
 
 export function NIP19Page() {
   const { nip19: identifier } = useParams<{ nip19: string }>();
   const { config } = useAppContext();
 
-  useEffect(() => {
-    if (identifier) {
-      const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
-      const cleanGateway = gateway.endsWith('/') ? gateway.slice(0, -1) : gateway;
-      window.location.href = `${cleanGateway}/${identifier}`;
+  const isValidNip19 = (() => {
+    if (!identifier) return false;
+    try {
+      nip19.decode(identifier);
+      return true;
+    } catch {
+      return false;
     }
-  }, [identifier, config.siteConfig?.nip19Gateway]);
+  })();
+
+  useEffect(() => {
+    if (!identifier || !isValidNip19) return;
+    const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
+    const cleanGateway = gateway.endsWith('/') ? gateway.slice(0, -1) : gateway;
+    window.location.href = `${cleanGateway}/${identifier}`;
+  }, [identifier, config.siteConfig?.nip19Gateway, isValidNip19]);
 
   if (!identifier) {
     return <NotFound />;
   }
 
-  try {
-    nip19.decode(identifier);
-  } catch {
-    return <NotFound />;
+  if (!isValidNip19) {
+    return <StaticPage pathOverride={`/${identifier}`} />;
   }
 
   return (
