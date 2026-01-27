@@ -215,7 +215,28 @@ function BrowseMediaSection() {
     queryKey: ['blossom-blobs', selectedRelay, user?.pubkey],
     queryFn: async () => {
       if (!selectedRelay || !user?.pubkey) return [];
-      const response = await fetch(`${selectedRelay}/list/${user.pubkey}`);
+      
+      const headers: Record<string, string> = {};
+      
+      // Some Blossom servers require authentication for listing blobs
+      if (user.signer) {
+        try {
+          const authEvent = await user.signer.signEvent({
+            kind: 24242, // Blossom List
+            content: 'List my blobs',
+            tags: [
+              ['t', 'list'],
+            ],
+            created_at: Math.floor(Date.now() / 1000),
+          });
+          const authBase64 = btoa(JSON.stringify(authEvent));
+          headers['Authorization'] = `Nostr ${authBase64}`;
+        } catch (e) {
+          console.error('Failed to sign Blossom list event:', e);
+        }
+      }
+
+      const response = await fetch(`${selectedRelay}/list/${user.pubkey}`, { headers });
       if (!response.ok) throw new Error('Failed to fetch blobs');
       return (await response.json()) as BlossomBlob[];
     },
