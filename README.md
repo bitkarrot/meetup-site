@@ -31,6 +31,8 @@ A comprehensive meetup or small organization and event management system built w
 - **Draft Support**: Save drafts to default relay before publishing.
 - **Site Configuration**: Customize logos, titles, favicons, and navigation menus.
 - **Relay Management**: Configure a **Primary Relay** (prioritized) and additional **Publishing Relays** for redundancy.
+- **Media Library**: Manage uploaded images and files via Blossom servers.
+- **Feed Management**: Curate and manage content feeds.
 - **Zaplytics**: Comprehensive analytics dashboard for tracking zap earnings, top contributors, and content performance.
 - **Reset to Defaults**: Quickly reset all site settings to environment variable defaults and clear local caches.
 
@@ -127,12 +129,23 @@ npm run build
 
 ## Admin Features In-Depth
 
-### System Settings & Reset
-The **Admin Settings** page allows the Master User to:
-- Assign roles to other admins.
-- Configure site-wide branding and metadata.
-- Manage the relay list.
-- Use the **Reset to Defaults** feature to purge all custom configuration and return to the `VITE_` environment variable state.
+### Settings Structure
+The application uses a layered configuration approach:
+
+1. **Environment Variables (`.env`)**: 
+   - Immutable infrastructure keys (Relays, Master Pubkey, Remote Admin JSON).
+   - Serves as the hardcoded default state.
+
+2. **Site Settings (Admin UI)**: 
+   - Customizable branding (Logo, Title, Description, Navigation).
+   - Stored as Replaceable Events (Kind 30078) on Nostr.
+   - Overrides defaults when present.
+
+3. **System Settings (Admin UI)**:
+   - Administrative configuration (Relay List, Admin Roles).
+   - Controls strictly limited to the Master User.
+
+The **Reset to Defaults** feature allows admins to purge the Nostr-based Site Settings and revert to the `.env` configuration.
 
 ### Static Pages (Kind 34128)
 Admins can create custom URL paths (e.g., `/about`, `/contact`) and upload content (HTML/Markdown) to Blossom. These are mapped using Kind 34128 events, allowing the site to serve decentralized static content.
