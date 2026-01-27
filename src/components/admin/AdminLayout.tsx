@@ -20,7 +20,8 @@ import {
   Shield,
   Rss,
   Zap,
-  FileImage
+  FileImage,
+  User
 } from 'lucide-react';
 
 export default function AdminLayout() {
@@ -34,6 +35,7 @@ export default function AdminLayout() {
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+    { name: 'Profile', href: '/admin/profile', icon: User },
     { name: 'Blog Posts', href: '/admin/blog', icon: FileText },
     { name: 'Events', href: '/admin/events', icon: Calendar },
     { name: 'Feed', href: '/admin/feed', icon: Rss },
