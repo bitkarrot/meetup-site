@@ -55,6 +55,11 @@ interface SiteConfig {
   heroTitle: string;
   heroSubtitle: string;
   heroBackground: string;
+  heroButtons: Array<{
+    label: string;
+    href: string;
+    variant?: 'default' | 'outline';
+  }>;
   showEvents: boolean;
   showBlog: boolean;
   feedNpubs: string[];
@@ -260,6 +265,10 @@ export default function AdminSettings() {
     heroTitle: config.siteConfig?.heroTitle ?? 'Welcome to Our Community',
     heroSubtitle: config.siteConfig?.heroSubtitle ?? 'Join us for amazing meetups and events',
     heroBackground: config.siteConfig?.heroBackground ?? 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop',
+    heroButtons: config.siteConfig?.heroButtons ?? [
+      { label: 'View Events', href: '/events', variant: 'default' },
+      { label: 'Read Blog', href: '/blog', variant: 'outline' },
+    ],
     showEvents: config.siteConfig?.showEvents ?? true,
     showBlog: config.siteConfig?.showBlog ?? true,
     feedNpubs: config.siteConfig?.feedNpubs ?? [],
@@ -289,6 +298,10 @@ export default function AdminSettings() {
       siteConfig.heroTitle !== (originalConfig.heroTitle ?? 'Welcome to Our Community') ||
       siteConfig.heroSubtitle !== (originalConfig.heroSubtitle ?? 'Join us for amazing meetups and events') ||
       siteConfig.heroBackground !== (originalConfig.heroBackground ?? 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop') ||
+      JSON.stringify(siteConfig.heroButtons) !== JSON.stringify(originalConfig.heroButtons ?? [
+        { label: 'View Events', href: '/events', variant: 'default' },
+        { label: 'Read Blog', href: '/blog', variant: 'outline' },
+      ]) ||
       siteConfig.showEvents !== (originalConfig.showEvents ?? true) ||
       siteConfig.showBlog !== (originalConfig.showBlog ?? true) ||
       JSON.stringify(siteConfig.feedNpubs) !== JSON.stringify(originalConfig.feedNpubs ?? []) ||
@@ -558,6 +571,16 @@ export default function AdminSettings() {
         const feedReadFromPublishRelays = eventTags.find(([name]) => name === 'feed_read_from_publish_relays')?.[1];
         if (feedReadFromPublishRelays !== undefined) loadedConfig.feedReadFromPublishRelays = feedReadFromPublishRelays === 'true';
 
+        const heroButtonsTag = eventTags.find(([name]) => name === 'hero_buttons')?.[1];
+        if (heroButtonsTag) {
+          try {
+            const parsed = JSON.parse(heroButtonsTag);
+            if (Array.isArray(parsed)) loadedConfig.heroButtons = parsed;
+          } catch (e) {
+            console.error('Failed to parse hero_buttons tag', e);
+          }
+        }
+
         // Also load navigation from content
         let loadedNavigation: NavigationItem[] = [];
         try {
@@ -614,6 +637,7 @@ export default function AdminSettings() {
         ['hero_title', siteConfig.heroTitle],
         ['hero_subtitle', siteConfig.heroSubtitle],
         ['hero_background', siteConfig.heroBackground],
+        ['hero_buttons', JSON.stringify(siteConfig.heroButtons)],
         ['show_events', siteConfig.showEvents.toString()],
         ['show_blog', siteConfig.showBlog.toString()],
         ['max_events', siteConfig.maxEvents.toString()],
@@ -968,6 +992,92 @@ export default function AdminSettings() {
                               max="20"
                             />
                           </div>
+                        </div>
+
+                        <Separator />
+
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <div>
+                              <Label>Hero Buttons</Label>
+                              <p className="text-sm text-muted-foreground">Configure buttons displayed in the hero section</p>
+                            </div>
+                          </div>
+
+                          {siteConfig.heroButtons.map((button, index) => (
+                            <div key={index} className="mb-4 p-4 border rounded-md space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">Button {index + 1}</span>
+                                <div className="flex items-center gap-2">
+                                  <Label htmlFor={`enable-button-${index}`} className="text-xs text-muted-foreground">Enabled</Label>
+                                  <Switch
+                                    id={`enable-button-${index}`}
+                                    checked={button.label !== '' && button.href !== ''}
+                                    onCheckedChange={(checked) => {
+                                      const newButtons = [...siteConfig.heroButtons];
+                                      if (!checked) {
+                                        newButtons[index] = { ...button, label: '', href: '' };
+                                      } else {
+                                        newButtons[index] = { ...button, label: `Button ${index + 1}`, href: '/' };
+                                      }
+                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
+                                    }}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                  <Label htmlFor={`button-label-${index}`} className="text-xs">Button Label</Label>
+                                  <Input
+                                    id={`button-label-${index}`}
+                                    value={button.label}
+                                    onChange={(e) => {
+                                      const newButtons = [...siteConfig.heroButtons];
+                                      newButtons[index] = { ...button, label: e.target.value };
+                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
+                                    }}
+                                    placeholder="View Events"
+                                    disabled={button.label === '' && button.href === ''}
+                                  />
+                                </div>
+                                <div>
+                                  <Label htmlFor={`button-href-${index}`} className="text-xs">Button Link</Label>
+                                  <Input
+                                    id={`button-href-${index}`}
+                                    value={button.href}
+                                    onChange={(e) => {
+                                      const newButtons = [...siteConfig.heroButtons];
+                                      newButtons[index] = { ...button, href: e.target.value };
+                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
+                                    }}
+                                    placeholder="/events"
+                                    disabled={button.label === '' && button.href === ''}
+                                  />
+                                </div>
+                                <div>
+                                  <Label htmlFor={`button-variant-${index}`} className="text-xs">Button Style</Label>
+                                  <Select
+                                    value={button.variant || 'default'}
+                                    onValueChange={(val: 'default' | 'outline') => {
+                                      const newButtons = [...siteConfig.heroButtons];
+                                      newButtons[index] = { ...button, variant: val };
+                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
+                                    }}
+                                    disabled={button.label === '' && button.href === ''}
+                                  >
+                                    <SelectTrigger id={`button-variant-${index}`}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="default">Default (Filled)</SelectItem>
+                                      <SelectItem value="outline">Outline</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </CardContent>
                     </SortableSection>

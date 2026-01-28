@@ -77,23 +77,50 @@ function AuthorInfo({ pubkey }: { pubkey: string }) {
 
 function HeroSection() {
   const { config } = useAppContext();
-  
+
   const heroConfig = {
     heroTitle: config.siteConfig?.heroTitle || 'Welcome to Our Community',
     heroSubtitle: config.siteConfig?.heroSubtitle || 'Join us for amazing meetups and events',
     heroBackground: config.siteConfig?.heroBackground || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop'
   };
 
+  // Use configured heroButtons if available
+  const configuredButtons = config.siteConfig?.heroButtons;
+
+  // If no heroButtons configured, fall back to checking navigation menu for /events and /blog
+  const heroButtons = configuredButtons && configuredButtons.length > 0
+    ? configuredButtons
+    : (() => {
+        // Fallback: check if /events and /blog exist in navigation
+        const hasEventsInNav = config.navigation?.some(item => item.href === '/events' && !item.isSubmenu && !item.parentId);
+        const showEventsButton = config.siteConfig?.showEvents !== false && hasEventsInNav;
+
+        const hasBlogInNav = config.navigation?.some(item => item.href === '/blog' && !item.isSubmenu && !item.parentId);
+        const showBlogButton = config.siteConfig?.showBlog !== false && hasBlogInNav;
+
+        const buttons: Array<{ label: string; href: string; variant?: 'default' | 'outline' }> = [];
+        if (showEventsButton) {
+          buttons.push({ label: 'View Events', href: '/events', variant: 'default' });
+        }
+        if (showBlogButton) {
+          buttons.push({ label: 'Read Blog', href: '/blog', variant: 'outline' });
+        }
+        return buttons;
+      })();
+
+  // Filter out buttons with empty labels or hrefs (disabled buttons)
+  const activeButtons = heroButtons.filter(btn => btn.label && btn.href);
+
   return (
     <div className="relative h-[600px] overflow-hidden">
       {/* Background Image */}
-      <div 
+      <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: `url('${heroConfig.heroBackground}')` }}
       >
         <div className="absolute inset-0 bg-black/40" />
       </div>
-      
+
       {/* Content */}
       <div className="relative isolate flex items-center justify-center h-full">
         <div className="text-center px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
@@ -103,19 +130,24 @@ function HeroSection() {
           <p className="text-xl sm:text-2xl text-white/90 mb-8 max-w-2xl mx-auto">
             {heroConfig.heroSubtitle}
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" className="text-lg px-8 py-3" asChild>
-              <Link to="/events">
-                View Events
-                <ArrowRight className="ml-2 h-5 w-5" />
-              </Link>
-            </Button>
-            <Button size="lg" variant="outline" className="text-lg px-8 py-3 text-white border-white hover:bg-white hover:text-black" asChild>
-              <Link to="/blog">
-                Read Blog
-              </Link>
-            </Button>
-          </div>
+          {activeButtons.length > 0 && (
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              {activeButtons.map((button, index) => (
+                <Button
+                  key={index}
+                  size="lg"
+                  variant={button.variant === 'outline' ? 'outline' : 'default'}
+                  className={`text-lg px-8 py-3 ${button.variant === 'outline' ? 'text-white border-white hover:bg-white hover:text-black' : ''}`}
+                  asChild
+                >
+                  <Link to={button.href}>
+                    {button.label}
+                    {button.variant !== 'outline' && <ArrowRight className="ml-2 h-5 w-5" />}
+                  </Link>
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

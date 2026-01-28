@@ -23,6 +23,11 @@ export interface AppConfig {
     heroTitle?: string;
     heroSubtitle?: string;
     heroBackground?: string;
+    heroButtons?: Array<{
+      label: string;
+      href: string;
+      variant?: 'default' | 'outline';
+    }>;
     showEvents?: boolean;
     showBlog?: boolean;
     feedNpubs?: string[];

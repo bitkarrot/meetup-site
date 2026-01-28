@@ -20,6 +20,11 @@ export default {
 			}
 		},
 		extend: {
+			fontFamily: {
+				sans: 'var(--font-sans), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+				mono: 'var(--font-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+				serif: 'var(--font-serif), ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+			},
 			colors: {
 				border: 'var(--border)',
 				input: 'var(--input)',
@@ -91,6 +96,14 @@ export default {
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
 				'accordion-up': 'accordion-up 0.2s ease-out'
+			},
+			letterSpacing: {
+				normal: 'var(--tracking-normal)',
+				tighter: 'var(--tracking-tighter)',
+				tight: 'var(--tracking-tight)',
+				wide: 'var(--tracking-wide)',
+				wider: 'var(--tracking-wider)',
+				widest: 'var(--tracking-widest)',
 			}
 		}
 	},

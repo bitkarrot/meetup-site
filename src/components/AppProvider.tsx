@@ -34,6 +34,11 @@ const AppConfigSchema = z.object({
     heroTitle: z.string().optional(),
     heroSubtitle: z.string().optional(),
     heroBackground: z.string().optional(),
+    heroButtons: z.array(z.object({
+      label: z.string(),
+      href: z.string(),
+      variant: z.enum(['default', 'outline']).optional(),
+    })).optional(),
     showEvents: z.boolean().optional(),
     showBlog: z.boolean().optional(),
     maxEvents: z.number().optional(),
@@ -153,10 +158,14 @@ export function AppProvider(props: AppProviderProps) {
 function useTweakCNTheme(themeUrl?: string) {
   useEffect(() => {
     if (!themeUrl) {
-      // Remove existing TweakCN theme style tag if it exists
+      // Remove existing TweakCN theme style tags if they exist
       const existingStyle = document.getElementById('tweakcn-theme');
       if (existingStyle) {
         existingStyle.remove();
+      }
+      const existingFonts = document.getElementById('tweakcn-fonts');
+      if (existingFonts) {
+        existingFonts.remove();
       }
       return;
     }
@@ -168,23 +177,35 @@ function useTweakCNTheme(themeUrl?: string) {
         if (!response.ok) throw new Error(`Failed to fetch theme: ${response.statusText}`);
         const themeData = await response.json();
         console.log('[useTweakCNTheme] Received theme data:', themeData);
-        
+
         const vars = themeData.cssVars || themeData;
+
+        // Inject Google Fonts if the theme uses them
+        await injectGoogleFonts(vars);
 
         // TweakCN themes usually provide CSS variables in a specific format
         // We'll create a style tag and inject the variables
         let cssVars = '';
-        
+
         // Handle both light and dark modes if provided in the JSON
-        const formatVars = (entries: Record<string, string>) => {
+        const formatVars = (entries: Record<string, string>, prefix = '') => {
           return Object.entries(entries)
             .map(([k, v]) => {
               // Map TweakCN names to our CSS variable names if they differ
-              const varName = k === 'sidebar' ? 'sidebar-background' : k;
+              let varName = k === 'sidebar' ? 'sidebar-background' : k;
+              // Add prefix if provided (e.g., 'font-' for Tailwind compatibility)
+              if (prefix && !varName.startsWith(prefix)) {
+                varName = prefix + varName;
+              }
               return `--${varName}: ${v};`;
             })
             .join(' ');
         };
+
+        // Theme-wide variables (including fonts) - apply to :root
+        if (vars.theme) {
+          cssVars += `:root { ${formatVars(vars.theme)} }\n`;
+        }
 
         if (vars.light) {
           cssVars += `:root { ${formatVars(vars.light)} }\n`;
@@ -192,19 +213,19 @@ function useTweakCNTheme(themeUrl?: string) {
         if (vars.dark) {
           cssVars += `.dark { ${formatVars(vars.dark)} }\n`;
         }
-        
-        // If it's a flat object or has theme-wide vars, apply those too
-        if (vars.theme) {
-          cssVars += `:root { ${formatVars(vars.theme)} }\n`;
-        }
 
         // If it's just a flat object (fallback)
         if (!vars.light && !vars.dark && !vars.theme) {
           cssVars += `:root { ${formatVars(vars)} }`;
         }
 
+        // Process the css object for @layer rules (e.g., typography, letter-spacing)
+        if (themeData.css) {
+          cssVars += processThemeCss(themeData.css);
+        }
+
         console.log('[useTweakCNTheme] Injected CSS variables count:', cssVars.length);
-        
+
         let styleTag = document.getElementById('tweakcn-theme') as HTMLStyleElement;
         if (!styleTag) {
           styleTag = document.createElement('style');
@@ -221,6 +242,87 @@ function useTweakCNTheme(themeUrl?: string) {
 
     fetchTheme();
   }, [themeUrl]);
+}
+
+/**
+ * Inject Google Fonts links for fonts specified in the theme
+ */
+async function injectGoogleFonts(vars: any) {
+  const fontFamilies = new Set<string>();
+
+  // Collect font families from all sections
+  ['theme', 'light', 'dark'].forEach(section => {
+    if (vars[section]) {
+      ['font-sans', 'font-mono', 'font-serif'].forEach(fontVar => {
+        const fontFamily = vars[section][fontVar];
+        if (fontFamily) {
+          // Extract font family names (before the comma/fallback)
+          const fonts = fontFamily.split(',').map((f: string) => f.trim().replace(/['"]/g, '').replace(/\s*sans-serif\s*/i, '').replace(/\s*monospace\s*/i, '').replace(/\s*serif\s*/i, ''));
+          fonts.forEach((font: string) => {
+            if (font && !font.includes('system-ui') && !font.includes('Apple')) {
+              fontFamilies.add(font);
+            }
+          });
+        }
+      });
+    }
+  });
+
+  if (fontFamilies.size === 0) return;
+
+  // Remove existing fonts link
+  const existingLink = document.getElementById('tweakcn-fonts');
+  if (existingLink) {
+    existingLink.remove();
+  }
+
+  // Create Google Fonts link (subset to latin for performance)
+  const fontNames = Array.from(fontFamilies).join('&family=').replace(/\s+/g, '+');
+  const googleFontsUrl = `https://fonts.googleapis.com/css2?family=${fontNames}&display=swap`;
+
+  try {
+    // Preload the fonts
+    const link = document.createElement('link');
+    link.id = 'tweakcn-fonts';
+    link.rel = 'stylesheet';
+    link.href = googleFontsUrl;
+    document.head.appendChild(link);
+    console.log('[useTweakCNTheme] Injected Google Fonts:', fontNames);
+  } catch (error) {
+    console.warn('[useTweakCNTheme] Failed to load Google Fonts:', error);
+  }
+}
+
+/**
+ * Process the css object from TweakCN theme and convert to CSS string
+ */
+function processThemeCss(css: any): string {
+  let cssString = '';
+
+  if (!css) return cssString;
+
+  // Process @layer base rules
+  if (css['@layer base']) {
+    cssString += '@layer base {';
+    const baseRules = css['@layer base'];
+
+    // Process each selector in @layer base
+    Object.entries(baseRules).forEach(([selector, properties]) => {
+      cssString += `  ${selector} {`;
+      if (typeof properties === 'object' && properties !== null) {
+        Object.entries(properties as Record<string, string>).forEach(([prop, value]) => {
+          // Convert camelCase to kebab-case for CSS properties
+          const cssProp = prop.replace(/([A-Z])/g, '-$1').toLowerCase();
+          cssString += `    ${cssProp}: ${value};`;
+        });
+      }
+      cssString += '  }';
+    });
+
+    cssString += '}\n';
+  }
+
+  return cssString;
 }
 
 /**
