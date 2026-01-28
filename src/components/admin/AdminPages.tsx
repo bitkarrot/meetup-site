@@ -70,8 +70,8 @@ function PageCard({ page, user, onEdit, onDelete }: {
                       <Badge variant="outline" className="text-[10px]">Preview</Badge>
                     </div>
                     <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]} 
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
                         rehypePlugins={[rehypeRaw]}
                       >
                         {page.content}
@@ -145,7 +145,7 @@ export default function AdminPages() {
   const { mutateAsync: uploadFile } = useUploadFile();
   const { toast } = useToast();
   const { data: remoteNostrJson } = useRemoteNostrJson();
-  
+
   const [isCreating, setIsCreating] = useState(false);
   const [editingPage, setEditingPage] = useState<StaticPage | null>(null);
   const [selectedRelays, setSelectedRelays] = useState<string[]>([]);
@@ -170,7 +170,7 @@ export default function AdminPages() {
       const events = await nostr.query([
         { kinds: [34128], limit: 100 }
       ], { signal });
-      
+
       return events.map(event => {
         const tags = event.tags || [];
         const relayTags = tags.filter(([name]) => name === 'relay').map(([_, url]) => url);
@@ -190,12 +190,38 @@ export default function AdminPages() {
   // Filter pages based on nostr.json users
   const pages = filterByNostrJson && remoteNostrJson?.names
     ? allPages?.filter(page => {
-        const normalizedPubkey = page.pubkey.toLowerCase().trim();
-        return Object.values(remoteNostrJson.names).some(
-          pubkey => pubkey.toLowerCase().trim() === normalizedPubkey
-        );
-      })
+      const normalizedPubkey = page.pubkey.toLowerCase().trim();
+      return Object.values(remoteNostrJson.names).some(
+        pubkey => pubkey.toLowerCase().trim() === normalizedPubkey
+      );
+    })
     : allPages;
+
+  // Check if form is dirty
+  const isDirty = editingPage
+    ? (formData.path !== editingPage.path || formData.content !== editingPage.content)
+    : (formData.path.trim() !== '' || formData.content.trim() !== '');
+
+  // Prevent accidental navigation
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isCreating && isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isCreating, isDirty]);
+
+  const handleCancel = () => {
+    if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) {
+      return;
+    }
+    setIsCreating(false);
+    setEditingPage(null);
+    setFormData({ path: '', content: '' });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,6 +304,7 @@ export default function AdminPages() {
     });
     setEditingPage(page);
     setIsCreating(true);
+    window.scrollTo(0, 0);
   };
 
   const handleDelete = (page: StaticPage) => {
@@ -306,157 +333,164 @@ export default function AdminPages() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Static Pages</h2>
-          <p className="text-muted-foreground">
-            Manage static site content mapped via NIP-nsite (kind 34128).
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Showing pages from default relay only: <span className="font-mono">{import.meta.env.VITE_DEFAULT_RELAY}</span>
-          </p>
-          <div className="flex items-center gap-2 mt-3">
-            <Switch
-              id="filter-nostr-json"
-              checked={filterByNostrJson}
-              onCheckedChange={setFilterByNostrJson}
-            />
-            <Label htmlFor="filter-nostr-json" className="text-sm cursor-pointer flex items-center gap-2">
-              <Filter className="h-3 w-3" />
-              Show only users from nostr.json
-            </Label>
+      {isCreating ? (
+        <>
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold tracking-tight">
+              {editingPage ? 'Edit Page' : 'Create New Page'}
+            </h2>
+            <Button variant="outline" onClick={handleCancel}>
+              Back to List
+            </Button>
           </div>
-        </div>
-        <Button onClick={() => setIsCreating(true)} disabled={isCreating}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Page
-        </Button>
-      </div>
 
-      {isCreating && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{editingPage ? 'Edit Page' : 'Create New Page'}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="path">Path (e.g. /about)</Label>
-                <Input
-                  id="path"
-                  value={formData.path}
-                  onChange={(e) => setFormData(prev => ({ ...prev, path: e.target.value }))}
-                  placeholder="/about"
-                  required
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="content">Content (HTML or Markdown)</Label>
-                <Tabs defaultValue="edit" className="mt-2">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="edit">
-                      <Layout className="h-4 w-4 mr-2" />
-                      Edit
-                    </TabsTrigger>
-                    <TabsTrigger value="preview">
-                      <Eye className="h-4 w-4 mr-2" />
-                      Preview
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="edit" className="mt-2">
-                    <Textarea
-                      id="content"
-                      value={formData.content}
-                      onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                      placeholder="Enter page content..."
-                      className="min-h-[300px] font-mono"
-                      required
-                    />
-                  </TabsContent>
-                  <TabsContent value="preview" className="mt-2">
-                    <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
-                      <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]} 
-                        rehypePlugins={[rehypeRaw]}
-                      >
-                        {formData.content || "*Nothing to preview*"}
-                      </ReactMarkdown>
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              </div>
-
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Share2 className="h-4 w-4" />
-                  Publishing Relays
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {initialPublishRelays.map((relay) => (
-                    <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
-                      <Checkbox 
-                        id={`relay-${relay}`} 
-                        checked={selectedRelays.includes(relay)}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedRelays(prev => [...prev, relay]);
-                          } else {
-                            setSelectedRelays(prev => prev.filter(r => r !== relay));
-                          }
-                        }}
-                      />
-                      <label
-                        htmlFor={`relay-${relay}`}
-                        className="text-xs font-mono truncate cursor-pointer flex-1"
-                      >
-                        {relay.replace('wss://', '').replace('ws://', '')}
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button type="submit">
-                  {editingPage ? 'Update Page' : 'Create Page'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setIsCreating(false);
-                    setEditingPage(null);
-                    setFormData({ path: '', content: '' });
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="space-y-4">
-        {pages?.map((page) => (
-          <PageCard
-            key={page.id}
-            page={page}
-            user={user || null}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-          />
-        ))}
-        
-        {(!pages || pages.length === 0) && (
           <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-muted-foreground">No static pages yet. Create your first page!</p>
+            <CardContent className="pt-6">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="path">Path (e.g. /about)</Label>
+                  <Input
+                    id="path"
+                    value={formData.path}
+                    onChange={(e) => setFormData(prev => ({ ...prev, path: e.target.value }))}
+                    placeholder="/about"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="content">Content (HTML or Markdown)</Label>
+                  <Tabs defaultValue="edit" className="mt-2">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="edit">
+                        <Layout className="h-4 w-4 mr-2" />
+                        Edit
+                      </TabsTrigger>
+                      <TabsTrigger value="preview">
+                        <Eye className="h-4 w-4 mr-2" />
+                        Preview
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="edit" className="mt-2">
+                      <Textarea
+                        id="content"
+                        value={formData.content}
+                        onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                        placeholder="Enter page content..."
+                        className="min-h-[300px] font-mono"
+                        required
+                      />
+                    </TabsContent>
+                    <TabsContent value="preview" className="mt-2">
+                      <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeRaw]}
+                        >
+                          {formData.content || "*Nothing to preview*"}
+                        </ReactMarkdown>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+
+                <div className="space-y-3 pt-4 border-t">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Share2 className="h-4 w-4" />
+                    Publishing Relays
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {initialPublishRelays.map((relay) => (
+                      <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
+                        <Checkbox
+                          id={`relay-${relay}`}
+                          checked={selectedRelays.includes(relay)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedRelays(prev => [...prev, relay]);
+                            } else {
+                              setSelectedRelays(prev => prev.filter(r => r !== relay));
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`relay-${relay}`}
+                          className="text-xs font-mono truncate cursor-pointer flex-1"
+                        >
+                          {relay.replace('wss://', '').replace('ws://', '')}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button type="submit">
+                    {editingPage ? 'Update Page' : 'Create Page'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCancel}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
-        )}
-      </div>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">Static Pages</h2>
+              <p className="text-muted-foreground">
+                Manage static site content mapped via NIP-nsite (kind 34128).
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Showing pages from default relay only: <span className="font-mono">{import.meta.env.VITE_DEFAULT_RELAY}</span>
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                <Switch
+                  id="filter-nostr-json"
+                  checked={filterByNostrJson}
+                  onCheckedChange={setFilterByNostrJson}
+                />
+                <Label htmlFor="filter-nostr-json" className="text-sm cursor-pointer flex items-center gap-2">
+                  <Filter className="h-3 w-3" />
+                  Show only users from nostr.json
+                </Label>
+              </div>
+            </div>
+            <Button onClick={() => setIsCreating(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Page
+            </Button>
+          </div>
+
+          <div className="space-y-4">
+            {pages?.map((page) => (
+              <PageCard
+                key={page.id}
+                page={page}
+                user={user || null}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))}
+
+            {(!pages || pages.length === 0) && (
+              <Card>
+                <CardContent className="pt-6 text-center">
+                  <p className="text-muted-foreground">No static pages yet. Create your first page!</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
+

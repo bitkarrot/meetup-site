@@ -34,7 +34,7 @@ interface BlogPost {
 
 function AuthorInfo({ pubkey }: { pubkey: string }) {
   const { data: author } = useAuthor(pubkey);
-  
+
   let npub = '';
   try {
     if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) {
@@ -51,7 +51,7 @@ function AuthorInfo({ pubkey }: { pubkey: string }) {
         <AvatarFallback>{author?.metadata?.name?.charAt(0) || '?'}</AvatarFallback>
       </Avatar>
       {npub ? (
-        <a 
+        <a
           href={`https://nostr.at/${npub}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -76,7 +76,7 @@ function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
   onDelete: (post: BlogPost) => void;
 }) {
   const { data: author } = useAuthor(post.pubkey);
-  
+
   // Filter by username search
   if (usernameSearch.trim()) {
     const username = author?.metadata?.name || author?.metadata?.display_name || '';
@@ -153,14 +153,14 @@ export default function AdminBlog() {
     queryFn: async () => {
       const signal = AbortSignal.timeout(5000);
       const filters: NostrFilter[] = [{ kinds: [30023], limit: 100 }];
-      
+
       // If user is logged in, also fetch their private drafts (Kind 31234)
       if (user?.pubkey) {
         filters.push({ kinds: [31234], authors: [user.pubkey], limit: 50 });
       }
 
       const events = await nostr.query(filters, { signal });
-      
+
       const processedPosts = await Promise.all(events.map(async (event) => {
         const tags = event.tags || [];
         let content = event.content;
@@ -241,6 +241,32 @@ export default function AdminBlog() {
   // consider using a separate component with useAuthor for each post
   const posts = allPosts;
 
+  // Check if form is dirty
+  const isDirty = editingPost
+    ? (formData.title !== editingPost.title || formData.content !== editingPost.content || formData.published !== editingPost.published)
+    : (formData.title.trim() !== '' || formData.content.trim() !== '');
+
+  // Prevent accidental navigation
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isCreating && isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isCreating, isDirty]);
+
+  const handleCancel = () => {
+    if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) {
+      return;
+    }
+    setIsCreating(false);
+    setEditingPost(null);
+    setFormData({ title: '', content: '', published: false });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !formData.title.trim() || !formData.content.trim()) return;
@@ -290,7 +316,7 @@ export default function AdminBlog() {
             relays: selectedRelays,
           });
         }
-        
+
         toast({ title: "Success", description: "Post published successfully." });
       } else {
         console.log('Saving as Kind 31234 Draft');
@@ -336,7 +362,7 @@ export default function AdminBlog() {
             relays: selectedRelays,
           });
         }
-        
+
         toast({ title: "Success", description: "Draft saved privately." });
       }
 
@@ -372,6 +398,7 @@ export default function AdminBlog() {
     });
     setEditingPost(post);
     setIsCreating(true);
+    window.scrollTo(0, 0);
   };
 
   const handleDelete = async (post: BlogPost) => {
@@ -413,168 +440,172 @@ export default function AdminBlog() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <h2 className="text-2xl font-bold tracking-tight">Blog Posts</h2>
-          <p className="text-muted-foreground">
-            Manage your blog posts and long-form content.
-          </p>
-          <div className="mt-3 max-w-sm">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by username..."
-                value={usernameSearch}
-                onChange={(e) => setUsernameSearch(e.target.value)}
-                className="pl-8"
-              />
-            </div>
+      {isCreating ? (
+        <>
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold tracking-tight">
+              {editingPost ? 'Edit Post' : 'Create New Post'}
+            </h2>
+            <Button variant="outline" onClick={handleCancel}>
+              Back to List
+            </Button>
           </div>
-        </div>
-        <Button onClick={() => setIsCreating(true)} disabled={isCreating}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Post
-        </Button>
-      </div>
 
-      {/* Create/Edit Form */}
-      {isCreating && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{editingPost ? 'Edit Post' : 'Create New Post'}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="title">Title</Label>
-                <Input
-                  id="title"
-                  value={formData.title}
-                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="Enter post title..."
-                  required
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="content">Content (Markdown)</Label>
-                <Tabs defaultValue="edit" className="mt-2">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="edit">
-                      <Layout className="h-4 w-4 mr-2" />
-                      Edit
-                    </TabsTrigger>
-                    <TabsTrigger value="preview">
-                      <Eye className="h-4 w-4 mr-2" />
-                      Preview
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="edit" className="mt-2">
-                    <Textarea
-                      id="content"
-                      value={formData.content}
-                      onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                      placeholder="Write your post in Markdown..."
-                      className="min-h-[300px] font-mono"
-                      required
-                    />
-                  </TabsContent>
-                  <TabsContent value="preview" className="mt-2">
-                    <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {formData.content || "*Nothing to preview*"}
-                      </ReactMarkdown>
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="published"
-                  checked={formData.published}
-                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, published: checked }))}
-                />
-                <Label htmlFor="published">Publish immediately</Label>
-              </div>
-
-              {/* Relay Selection */}
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Share2 className="h-4 w-4" />
-                  Publishing Relays
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {initialPublishRelays.map((relay) => (
-                    <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
-                      <Checkbox 
-                        id={`relay-${relay}`} 
-                        checked={selectedRelays.includes(relay)}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedRelays(prev => [...prev, relay]);
-                          } else {
-                            setSelectedRelays(prev => prev.filter(r => r !== relay));
-                          }
-                        }}
-                      />
-                      <label
-                        htmlFor={`relay-${relay}`}
-                        className="text-xs font-mono truncate cursor-pointer flex-1"
-                        title={relay}
-                      >
-                        {relay.replace('wss://', '').replace('ws://', '')}
-                      </label>
-                    </div>
-                  ))}
-                  {initialPublishRelays.length === 0 && (
-                    <p className="text-xs text-muted-foreground italic">No publishing relays configured.</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button type="submit">
-                  {editingPost ? 'Update Post' : 'Create Post'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setIsCreating(false);
-                    setEditingPost(null);
-                    setFormData({ title: '', content: '', published: false });
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Posts List */}
-      <div className="space-y-4">
-        {posts?.map((post) => (
-          <BlogPostCard
-            key={post.id}
-            post={post}
-            user={user}
-            usernameSearch={usernameSearch}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-          />
-        ))}
-        
-        {(!posts || posts.length === 0) && (
           <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-muted-foreground">No blog posts yet. Create your first post!</p>
+            <CardContent className="pt-6">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="title">Title</Label>
+                  <Input
+                    id="title"
+                    value={formData.title}
+                    onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="Enter post title..."
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="content">Content (Markdown)</Label>
+                  <Tabs defaultValue="edit" className="mt-2">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="edit">
+                        <Layout className="h-4 w-4 mr-2" />
+                        Edit
+                      </TabsTrigger>
+                      <TabsTrigger value="preview">
+                        <Eye className="h-4 w-4 mr-2" />
+                        Preview
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="edit" className="mt-2">
+                      <Textarea
+                        id="content"
+                        value={formData.content}
+                        onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                        placeholder="Write your post in Markdown..."
+                        className="min-h-[300px] font-mono"
+                        required
+                      />
+                    </TabsContent>
+                    <TabsContent value="preview" className="mt-2">
+                      <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {formData.content || "*Nothing to preview*"}
+                        </ReactMarkdown>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="published"
+                    checked={formData.published}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, published: checked }))}
+                  />
+                  <Label htmlFor="published">Publish immediately</Label>
+                </div>
+
+                {/* Relay Selection */}
+                <div className="space-y-3 pt-4 border-t">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Share2 className="h-4 w-4" />
+                    Publishing Relays
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {initialPublishRelays.map((relay) => (
+                      <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
+                        <Checkbox
+                          id={`relay-${relay}`}
+                          checked={selectedRelays.includes(relay)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedRelays(prev => [...prev, relay]);
+                            } else {
+                              setSelectedRelays(prev => prev.filter(r => r !== relay));
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`relay-${relay}`}
+                          className="text-xs font-mono truncate cursor-pointer flex-1"
+                          title={relay}
+                        >
+                          {relay.replace('wss://', '').replace('ws://', '')}
+                        </label>
+                      </div>
+                    ))}
+                    {initialPublishRelays.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic">No publishing relays configured.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button type="submit">
+                    {editingPost ? 'Update Post' : 'Create Post'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCancel}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
-        )}
-      </div>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h2 className="text-2xl font-bold tracking-tight">Blog Posts</h2>
+              <p className="text-muted-foreground">
+                Manage your blog posts and long-form content.
+              </p>
+              <div className="mt-3 max-w-sm">
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by username..."
+                    value={usernameSearch}
+                    onChange={(e) => setUsernameSearch(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+              </div>
+            </div>
+            <Button onClick={() => setIsCreating(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Post
+            </Button>
+          </div>
+
+          <div className="space-y-4">
+            {posts?.map((post) => (
+              <BlogPostCard
+                key={post.id}
+                post={post}
+                user={user}
+                usernameSearch={usernameSearch}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))}
+
+            {(!posts || posts.length === 0) && (
+              <Card>
+                <CardContent className="pt-6 text-center">
+                  <p className="text-muted-foreground">No blog posts yet. Create your first post!</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
