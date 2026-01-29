@@ -70,18 +70,18 @@ export function NostrSync() {
     const syncSiteConfigFromMaster = async () => {
       try {
         console.log('[NostrSync] Fetching site config from master:', masterPubkey);
-        
+
         // Get the current default relay from environment variable
         const envDefaultRelay = import.meta.env.VITE_DEFAULT_RELAY;
-        
+
         // Check if the environment variable relay differs from what's in localStorage
         const localStoredRelay = config.siteConfig?.defaultRelay;
         const relayHasChanged = envDefaultRelay && localStoredRelay && envDefaultRelay !== localStoredRelay;
-        
+
         if (relayHasChanged) {
           console.log('[NostrSync] VITE_DEFAULT_RELAY has changed from', localStoredRelay, 'to', envDefaultRelay);
           console.log('[NostrSync] Skipping relay sync and prioritizing environment variable');
-          
+
           // Update config to use the new relay from environment variable
           updateConfig((current) => ({
             ...current,
@@ -97,11 +97,11 @@ export function NostrSync() {
         }
 
         const events = await nostr.query(
-          [{ 
-            kinds: [30078], 
-            authors: [masterPubkey], 
+          [{
+            kinds: [30078],
+            authors: [masterPubkey],
             '#d': ['nostr-meetup-site-config'],
-            limit: 1 
+            limit: 1
           }],
           { signal: AbortSignal.timeout(5000) }
         );
@@ -109,7 +109,7 @@ export function NostrSync() {
         if (events.length > 0) {
           const event = events[0];
           const loadedConfig: Record<string, string | boolean | number | string[] | Record<string, string> | undefined> = {};
-          
+
           const tags = {
             title: 'title',
             logo: 'logo',
@@ -135,11 +135,11 @@ export function NostrSync() {
           // Check if relay from Nostr event differs from environment variable
           const relayFromEvent = loadedConfig.defaultRelay as string | undefined;
           const eventRelayDiffersFromEnv = envDefaultRelay && relayFromEvent && envDefaultRelay !== relayFromEvent;
-          
+
           if (eventRelayDiffersFromEnv) {
             console.log('[NostrSync] Relay in Nostr event', relayFromEvent, 'differs from VITE_DEFAULT_RELAY', envDefaultRelay);
             console.log('[NostrSync] Prioritizing environment variable over relay data');
-            
+
             // Override the relay from the event with the environment variable
             loadedConfig.defaultRelay = envDefaultRelay;
           }
@@ -154,13 +154,13 @@ export function NostrSync() {
           // Handle booleans and numbers
           const showEvents = eventTags.find(([name]) => name === 'show_events')?.[1];
           if (showEvents !== undefined) loadedConfig.showEvents = showEvents === 'true';
-          
+
           const showBlog = eventTags.find(([name]) => name === 'show_blog')?.[1];
           if (showBlog !== undefined) loadedConfig.showBlog = showBlog === 'true';
-          
+
           const maxEvents = eventTags.find(([name]) => name === 'max_events')?.[1];
           if (maxEvents !== undefined) loadedConfig.maxEvents = parseInt(maxEvents);
-          
+
           const maxBlogPosts = eventTags.find(([name]) => name === 'max_blog_posts')?.[1];
           if (maxBlogPosts !== undefined) loadedConfig.maxBlogPosts = parseInt(maxBlogPosts);
 
@@ -176,6 +176,9 @@ export function NostrSync() {
 
           const feedReadTag = eventTags.find(([name]) => name === 'feed_read_from_publish_relays')?.[1];
           if (feedReadTag !== undefined) loadedConfig.feedReadFromPublishRelays = feedReadTag === 'true';
+
+          const readOnlyTag = eventTags.find(([name]) => name === 'read_only_admin_access')?.[1];
+          if (readOnlyTag !== undefined) loadedConfig.readOnlyAdminAccess = readOnlyTag === 'true';
 
           const relaysTag = eventTags.find(([name]) => name === 'publish_relays')?.[1];
           if (relaysTag) {

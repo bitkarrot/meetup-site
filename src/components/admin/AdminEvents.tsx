@@ -11,7 +11,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useAuthor } from '@/hooks/useAuthor';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Edit, Trash2, Calendar, MapPin, Share2, Eye, Layout, Search, ExternalLink } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, MapPin, Share2, Eye, Layout, Search, ExternalLink, Library } from 'lucide-react';
+import { MediaSelectorDialog } from './MediaSelectorDialog';
 import { AuthorInfo } from '@/components/AuthorInfo';
 import { useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -141,6 +142,7 @@ export default function AdminEvents() {
     image: '',
     status: 'confirmed',
   });
+  const [showMediaSelector, setShowMediaSelector] = useState(false);
 
   // Initialize selected relays
   useEffect(() => {
@@ -511,11 +513,32 @@ export default function AdminEvents() {
 
                 <div>
                   <Label htmlFor="image">Image URL (optional)</Label>
-                  <Input
-                    id="image"
-                    value={formData.image}
-                    onChange={(e) => setFormData(prev => ({ ...prev, image: e.target.value }))}
-                    placeholder="https://..."
+                  <div className="flex gap-2">
+                    <Input
+                      id="image"
+                      value={formData.image}
+                      onChange={(e) => setFormData(prev => ({ ...prev, image: e.target.value }))}
+                      placeholder="https://..."
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowMediaSelector(true)}
+                      title="Select from Media Library"
+                    >
+                      <Library className="h-4 w-4 mr-2" />
+                      Media Library
+                    </Button>
+                  </div>
+                  <MediaSelectorDialog
+                    open={showMediaSelector}
+                    onOpenChange={setShowMediaSelector}
+                    onSelect={(url) => {
+                      setFormData(prev => ({ ...prev, image: url }));
+                      setShowMediaSelector(false);
+                    }}
+                    title="Select Event Image"
                   />
                 </div>
 

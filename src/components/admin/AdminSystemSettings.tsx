@@ -13,7 +13,9 @@ import { useRemoteNostrJson } from '@/hooks/useRemoteNostrJson';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useAdminAuth } from '@/hooks/useRemoteNostrJson';
 
 interface SiteConfig {
   title: string;
@@ -35,6 +37,7 @@ interface SiteConfig {
   feedNpubs: string[];
   feedReadFromPublishRelays: boolean;
   sectionOrder?: string[];
+  readOnlyAdminAccess: boolean;
   updatedAt?: number;
 }
 
@@ -137,12 +140,13 @@ export default function AdminSystemSettings() {
     feedNpubs: config.siteConfig?.feedNpubs ?? [],
     feedReadFromPublishRelays: config.siteConfig?.feedReadFromPublishRelays ?? false,
     sectionOrder: config.siteConfig?.sectionOrder ?? ['navigation', 'basic', 'styling', 'hero', 'content', 'feed'],
+    readOnlyAdminAccess: config.siteConfig?.readOnlyAdminAccess ?? false,
   }));
 
   const { data: remoteNostrJson } = useRemoteNostrJson();
 
   useEffect(() => {
-    if (!isMasterUser || isSaving || isRefreshing) return;
+    if (isSaving || isRefreshing) return;
 
     if (config.siteConfig) {
       setSiteConfig(prev => ({
@@ -157,7 +161,19 @@ export default function AdminSystemSettings() {
     }
   }, [config.siteConfig, isSaving, isRefreshing, isMasterUser]);
 
-  if (!isMasterUser) {
+  const { isAdmin, isLoading: authLoading } = useAdminAuth(user?.pubkey);
+  const canView = isMasterUser || (isAdmin && (siteConfig.readOnlyAdminAccess || config.siteConfig?.readOnlyAdminAccess));
+
+  if (authLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="text-muted-foreground">Checking authorization...</p>
+      </div>
+    );
+  }
+
+  if (!canView) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
         <ShieldAlert className="h-12 w-12 text-destructive" />
@@ -197,7 +213,8 @@ export default function AdminSystemSettings() {
           heroBackground: 'hero_background',
           defaultRelay: 'default_relay',
           tweakcnThemeUrl: 'tweakcn_theme_url',
-          blossomRelays: 'blossom_relays'
+          blossomRelays: 'blossom_relays',
+          readOnlyAdminAccess: 'read_only_admin_access'
         };
 
         const eventTags = event.tags || [];
@@ -219,6 +236,9 @@ export default function AdminSystemSettings() {
 
         const showBlog = eventTags.find(([name]) => name === 'show_blog')?.[1];
         if (showBlog !== undefined) loadedConfig.showBlog = showBlog === 'true';
+
+        const readOnlyAdminAccess = eventTags.find(([name]) => name === 'read_only_admin_access')?.[1];
+        if (readOnlyAdminAccess !== undefined) loadedConfig.readOnlyAdminAccess = readOnlyAdminAccess === 'true';
 
         const maxEvents = eventTags.find(([name]) => name === 'max_events')?.[1];
         if (maxEvents !== undefined) loadedConfig.maxEvents = parseInt(maxEvents);
@@ -328,6 +348,7 @@ export default function AdminSystemSettings() {
         ['feed_read_from_publish_relays', siteConfig.feedReadFromPublishRelays.toString()],
         ['tweakcn_theme_url', siteConfig.tweakcnThemeUrl || ''],
         ['section_order', JSON.stringify(siteConfig.sectionOrder || [])],
+        ['read_only_admin_access', siteConfig.readOnlyAdminAccess.toString()],
         ['updated_at', Math.floor(Date.now() / 1000).toString()],
       ];
 
@@ -362,7 +383,7 @@ export default function AdminSystemSettings() {
       try {
         // Get default values from environment variables
         const envDefaultRelay = import.meta.env.VITE_DEFAULT_RELAY;
-        
+
         // 1. Delete NIP-65 relay list (kind 10002) from the relay
         if (user) {
           try {
@@ -381,7 +402,7 @@ export default function AdminSystemSettings() {
             console.error('[handleResetToDefaults] Failed to delete relay metadata:', e);
           }
         }
-        
+
         // 2. Publish Kind 30078 with default values (blanked out except for default relay)
         const defaultConfigTags = [
           ['d', 'nostr-meetup-site-config'],
@@ -410,7 +431,7 @@ export default function AdminSystemSettings() {
         await publishEvent({
           event: {
             kind: 30078,
-            content: JSON.stringify({ 
+            content: JSON.stringify({
               navigation: [
                 { id: '2', name: 'Events', href: '/events', isSubmenu: false },
                 { id: '3', name: 'Blog', href: '/blog', isSubmenu: false },
@@ -444,20 +465,29 @@ export default function AdminSystemSettings() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="destructive" onClick={handleResetToDefaults}>
+          <Button variant="destructive" onClick={handleResetToDefaults} disabled={!isMasterUser}>
             <RotateCcw className="h-4 w-4 mr-2" />
             Reset to Defaults
           </Button>
-          <Button variant="outline" onClick={handleLoadConfig} disabled={isRefreshing || !user}>
+          <Button variant="outline" onClick={handleLoadConfig} disabled={isRefreshing || !user || !isMasterUser}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? 'Refreshing...' : 'Refresh from Relay'}
           </Button>
-          <Button onClick={handleSaveConfig} disabled={isSaving}>
+          <Button onClick={handleSaveConfig} disabled={isSaving || !isMasterUser}>
             <Save className="h-4 w-4 mr-2" />
             {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
       </div>
+
+      {siteConfig.readOnlyAdminAccess && !isMasterUser && (
+        <div className="flex items-center gap-2 p-4 border rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-800">
+          <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+          <div className="text-sm">
+            <span className="font-bold">Read Only Mode:</span> You are viewing these settings in demo mode. Changes cannot be saved.
+          </div>
+        </div>
+      )}
 
       {/* Relay Configuration */}
       <Card>
@@ -472,6 +502,7 @@ export default function AdminSystemSettings() {
               value={siteConfig.defaultRelay}
               onChange={(e) => setSiteConfig(prev => ({ ...prev, defaultRelay: e.target.value }))}
               placeholder="wss://relay.example.com"
+              disabled={!isMasterUser}
             />
             <p className="text-xs text-muted-foreground mt-1">
               This relay is used as the primary source for reading and publishing site content.
@@ -497,6 +528,7 @@ export default function AdminSystemSettings() {
                       setSiteConfig(prev => ({ ...prev, publishRelays: newRelays }));
                     }}
                     placeholder="wss://relay.example.com"
+                    disabled={!isMasterUser}
                   />
                   <Button
                     variant="outline"
@@ -512,6 +544,7 @@ export default function AdminSystemSettings() {
               ))}
               <Button
                 variant="outline"
+                disabled={!isMasterUser}
                 onClick={() => {
                   setSiteConfig(prev => ({
                     ...prev,
@@ -545,16 +578,16 @@ export default function AdminSystemSettings() {
           </CardTitle>
           <p className="text-sm text-muted-foreground">
             Manage permissions for users listed in the <b>nostr.json</b> file.
-            </p>
-            <p className="text-sm">
-            Your current nostr.json is located at: 
+          </p>
+          <p className="text-sm">
+            Your current nostr.json is located at:
             <b className="break-all">
               {import.meta.env.VITE_REMOTE_NOSTR_JSON_URL || 'Not configured'}
             </b>
-            </p>
-            <p className="text-sm text-muted-foreground">
+          </p>
+          <p className="text-sm text-muted-foreground">
             {isMasterUser ? " As the master user, you can assign roles." : " View only access."}
-            </p>
+          </p>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-4">
@@ -570,6 +603,21 @@ export default function AdminSystemSettings() {
                 <span className="font-bold">Secondary Admins:</span> Content published by these users requires delegation/approval by a primary admin.
               </div>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between p-4 border rounded-lg bg-primary/5">
+            <div className="space-y-0.5">
+              <Label htmlFor="demo-mode">Read-Only Admin Access (Demo Mode)</Label>
+              <p className="text-xs text-muted-foreground">
+                Allow all admins in <b>nostr.json</b> to view Site and Admin settings in read-only mode.
+              </p>
+            </div>
+            <Switch
+              id="demo-mode"
+              disabled={!isMasterUser}
+              checked={siteConfig.readOnlyAdminAccess}
+              onCheckedChange={(checked) => setSiteConfig(prev => ({ ...prev, readOnlyAdminAccess: checked }))}
+            />
           </div>
 
           <div className="grid gap-4">

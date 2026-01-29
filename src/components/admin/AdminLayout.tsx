@@ -6,6 +6,8 @@ import { Separator } from '@/components/ui/separator';
 import { useTheme } from '@/hooks/useTheme';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAppContext } from '@/hooks/useAppContext';
+import { useAdminAuth } from '@/hooks/useRemoteNostrJson';
 import {
   LayoutDashboard,
   FileText,
@@ -30,8 +32,13 @@ export default function AdminLayout() {
   const { theme, setTheme } = useTheme();
   const { user } = useCurrentUser();
 
+  const { config } = useAppContext();
+  const { isAdmin } = useAdminAuth(user?.pubkey);
+  const readOnlyEnabled = config.siteConfig?.readOnlyAdminAccess ?? false;
+
   const masterPubkey = (import.meta.env.VITE_MASTER_PUBKEY || '').toLowerCase().trim();
   const isMasterUser = user?.pubkey.toLowerCase().trim() === masterPubkey;
+  const canAccessSettings = isMasterUser || (isAdmin && readOnlyEnabled);
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
@@ -42,7 +49,7 @@ export default function AdminLayout() {
     { name: 'Zaplytics', href: '/admin/zaplytics', icon: Zap },
     { name: 'Media', href: '/admin/media', icon: FileImage },
     { name: 'Pages', href: '/admin/pages', icon: FileCode },
-    ...(isMasterUser ? [
+    ...(canAccessSettings ? [
       { name: 'Site Settings', href: '/admin/settings', icon: Settings },
       { name: 'Admin Settings', href: '/admin/system-settings', icon: Shield }
     ] : []),

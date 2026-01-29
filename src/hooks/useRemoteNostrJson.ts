@@ -26,10 +26,10 @@ export function useRemoteNostrJson(url: string = DEFAULT_NOSTR_JSON_URL) {
 
 export function useAdminAuth(pubkey?: string) {
   const { data: nostrJson, isLoading } = useRemoteNostrJson();
-  
-  const isAdmin = pubkey && nostrJson?.names ? 
-    Object.values(nostrJson.names).includes(pubkey) : false;
-  
+
+  const isAdmin = pubkey && nostrJson?.names ?
+    Object.values(nostrJson.names).some(pk => pk.toLowerCase().trim() === pubkey.toLowerCase().trim()) : false;
+
   return {
     isAdmin,
     isLoading,

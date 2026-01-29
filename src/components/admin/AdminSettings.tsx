@@ -20,6 +20,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Save, Plus, Trash2, GripVertical, RefreshCw, ShieldAlert, Eye, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
+import { useAdminAuth } from '@/hooks/useRemoteNostrJson';
+import { AlertTriangle } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -72,6 +74,7 @@ interface SiteConfig {
   tweakcnThemeUrl?: string;
   sectionOrder?: string[];
   nip19Gateway?: string;
+  readOnlyAdminAccess: boolean;
   updatedAt?: number;
 }
 
@@ -89,9 +92,10 @@ interface SortableNavItemProps {
   navigation: NavigationItem[];
   onUpdate: (id: string, updates: Partial<NavigationItem>) => void;
   onRemove: (id: string) => void;
+  disabled?: boolean;
 }
 
-function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavItemProps) {
+function SortableNavItem({ item, navigation, onUpdate, onRemove, disabled }: SortableNavItemProps) {
   const {
     attributes,
     listeners,
@@ -99,7 +103,7 @@ function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavIt
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.id, disabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -127,12 +131,14 @@ function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavIt
             value={item.name}
             onChange={(e) => onUpdate(item.id, { name: e.target.value })}
             placeholder="Name"
+            disabled={disabled}
           />
           {!item.isLabelOnly ? (
             <Input
               value={item.href}
               onChange={(e) => onUpdate(item.id, { href: e.target.value })}
               placeholder="/path"
+              disabled={disabled}
             />
           ) : (
             <div className="flex items-center px-3 text-sm text-muted-foreground italic border rounded-md bg-muted/50 h-10">
@@ -148,6 +154,7 @@ function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavIt
                 id={`label-only-${item.id}`}
                 checked={item.isLabelOnly}
                 onCheckedChange={(checked) => onUpdate(item.id, { isLabelOnly: checked })}
+                disabled={disabled}
               />
             </div>
           )}
@@ -155,6 +162,7 @@ function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavIt
             <Select
               value={item.parentId || "none"}
               onValueChange={(val) => onUpdate(item.id, { parentId: val === "none" ? undefined : val })}
+              disabled={disabled}
             >
               <SelectTrigger className="w-[140px] h-9">
                 <SelectValue placeholder="No parent" />
@@ -168,19 +176,20 @@ function SortableNavItem({ item, navigation, onUpdate, onRemove }: SortableNavIt
             </Select>
           )}
           {item.parentId && (
-             <Button
-               variant="ghost"
-               size="sm"
-               onClick={() => onUpdate(item.id, { parentId: undefined })}
-               title="Move to root"
-             >
-               <Plus className="h-4 w-4 rotate-45" />
-             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onUpdate(item.id, { parentId: undefined })}
+              title="Move to root"
+            >
+              <Plus className="h-4 w-4 rotate-45" />
+            </Button>
           )}
           <Button
             variant="outline"
             size="sm"
             onClick={() => onRemove(item.id)}
+            disabled={disabled}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -286,6 +295,7 @@ export default function AdminSettings() {
     tweakcnThemeUrl: config.siteConfig?.tweakcnThemeUrl ?? '',
     nip19Gateway: config.siteConfig?.nip19Gateway ?? 'https://nostr.at',
     sectionOrder: config.siteConfig?.sectionOrder ?? ['navigation', 'basic', 'styling', 'hero', 'content'],
+    readOnlyAdminAccess: config.siteConfig?.readOnlyAdminAccess ?? false,
   }));
 
   const isDirty = useMemo(() => {
@@ -456,7 +466,19 @@ export default function AdminSettings() {
     }
   };
 
-  if (!isMasterUser) {
+  const { isAdmin, isLoading: authLoading } = useAdminAuth(user?.pubkey);
+  const canView = isMasterUser || (isAdmin && (siteConfig.readOnlyAdminAccess || config.siteConfig?.readOnlyAdminAccess));
+
+  if (authLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="text-muted-foreground">Checking authorization...</p>
+      </div>
+    );
+  }
+
+  if (!canView) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
         <ShieldAlert className="h-12 w-12 text-destructive" />
@@ -499,7 +521,8 @@ export default function AdminSettings() {
           defaultRelay: 'default_relay',
           tweakcnThemeUrl: 'tweakcn_theme_url',
           nip19Gateway: 'nip19_gateway',
-          sectionOrder: 'section_order'
+          sectionOrder: 'section_order',
+          readOnlyAdminAccess: 'read_only_admin_access'
         };
 
         const eventTags = event.tags || [];
@@ -521,6 +544,9 @@ export default function AdminSettings() {
 
         const showBlog = eventTags.find(([name]) => name === 'show_blog')?.[1];
         if (showBlog !== undefined) loadedConfig.showBlog = showBlog === 'true';
+
+        const readOnlyAdminAccess = eventTags.find(([name]) => name === 'read_only_admin_access')?.[1];
+        if (readOnlyAdminAccess !== undefined) loadedConfig.readOnlyAdminAccess = readOnlyAdminAccess === 'true';
 
         const maxEvents = eventTags.find(([name]) => name === 'max_events')?.[1];
         if (maxEvents !== undefined) loadedConfig.maxEvents = parseInt(maxEvents);
@@ -650,6 +676,7 @@ export default function AdminSettings() {
         ['tweakcn_theme_url', siteConfig.tweakcnThemeUrl || ''],
         ['nip19_gateway', siteConfig.nip19Gateway || 'https://nostr.at'],
         ['section_order', JSON.stringify(siteConfig.sectionOrder)],
+        ['read_only_admin_access', siteConfig.readOnlyAdminAccess.toString()],
         ['updated_at', Math.floor(Date.now() / 1000).toString()],
       ];
 
@@ -713,16 +740,25 @@ export default function AdminSettings() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleLoadConfig} disabled={isRefreshing || !user}>
+          <Button variant="outline" onClick={handleLoadConfig} disabled={isRefreshing || !user || !isMasterUser}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? 'Refreshing...' : 'Refresh from Relay'}
           </Button>
-          <Button onClick={handleSaveConfig} disabled={isSaving}>
+          <Button onClick={handleSaveConfig} disabled={isSaving || !isMasterUser}>
             <Save className="h-4 w-4 mr-2" />
             {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
       </div>
+
+      {siteConfig.readOnlyAdminAccess && !isMasterUser && (
+        <div className="flex items-center gap-2 p-4 border rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-800">
+          <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+          <div className="text-sm">
+            <span className="font-bold">Read Only Mode:</span> You are viewing these settings in demo mode. Changes cannot be saved.
+          </div>
+        </div>
+      )}
 
       <DndContext
         sensors={sensors}
@@ -748,6 +784,7 @@ export default function AdminSettings() {
                               value={siteConfig.title}
                               onChange={(e) => setSiteConfig(prev => ({ ...prev, title: e.target.value }))}
                               placeholder="My Meetup Site"
+                              disabled={!isMasterUser}
                             />
                           </div>
                           <div>
@@ -757,6 +794,7 @@ export default function AdminSettings() {
                               value={siteConfig.logo}
                               onChange={(e) => setSiteConfig(prev => ({ ...prev, logo: e.target.value }))}
                               placeholder="https://..."
+                              disabled={!isMasterUser}
                             />
                           </div>
                           <div>
@@ -766,6 +804,7 @@ export default function AdminSettings() {
                               value={siteConfig.favicon}
                               onChange={(e) => setSiteConfig(prev => ({ ...prev, favicon: e.target.value }))}
                               placeholder="https://..."
+                              disabled={!isMasterUser}
                             />
                           </div>
                           <div>
@@ -775,6 +814,7 @@ export default function AdminSettings() {
                               value={siteConfig.ogImage}
                               onChange={(e) => setSiteConfig(prev => ({ ...prev, ogImage: e.target.value }))}
                               placeholder="https://..."
+                              disabled={!isMasterUser}
                             />
                           </div>
                           <div>
@@ -782,6 +822,7 @@ export default function AdminSettings() {
                             <Select
                               value={siteConfig.nip19Gateway || 'https://nostr.at'}
                               onValueChange={(val) => setSiteConfig(prev => ({ ...prev, nip19Gateway: val }))}
+                              disabled={!isMasterUser}
                             >
                               <SelectTrigger id="nip19Gateway">
                                 <SelectValue placeholder="Select a gateway" />
@@ -804,9 +845,9 @@ export default function AdminSettings() {
                   );
                 case 'styling':
                   return (
-                    <SortableSection 
-                      key="styling" 
-                      id="styling" 
+                    <SortableSection
+                      key="styling"
+                      id="styling"
                       title="Site Styling (TweakCN)"
                       description="TweakCN is a powerful theme engine that allows you to customize the visual appearance of your site using a simple JSON configuration."
                     >
@@ -820,6 +861,7 @@ export default function AdminSettings() {
                                 setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: url === 'none' ? '' : url }));
                                 setPreviewThemeUrl(null); // Clear preview when selection changes
                               }}
+                              disabled={!isMasterUser}
                             >
                               <SelectTrigger className="w-full">
                                 <SelectValue placeholder="Select a theme" />
@@ -864,6 +906,7 @@ export default function AdminSettings() {
                                 setPreviewThemeUrl(null);
                               }}
                               placeholder="https://tweakcn.com/r/themes/..."
+                              disabled={!isMasterUser}
                             />
                             <div className="flex gap-1">
                               {siteConfig.tweakcnThemeUrl && (
@@ -922,6 +965,7 @@ export default function AdminSettings() {
                             value={siteConfig.heroTitle}
                             onChange={(e) => setSiteConfig(prev => ({ ...prev, heroTitle: e.target.value }))}
                             placeholder="Welcome to Our Community"
+                            disabled={!isMasterUser}
                           />
                         </div>
                         <div>
@@ -931,6 +975,7 @@ export default function AdminSettings() {
                             value={siteConfig.heroSubtitle}
                             onChange={(e) => setSiteConfig(prev => ({ ...prev, heroSubtitle: e.target.value }))}
                             placeholder="Join us for amazing meetups and events"
+                            disabled={!isMasterUser}
                           />
                         </div>
                         <div>
@@ -940,6 +985,7 @@ export default function AdminSettings() {
                             value={siteConfig.heroBackground}
                             onChange={(e) => setSiteConfig(prev => ({ ...prev, heroBackground: e.target.value }))}
                             placeholder="https://..."
+                            disabled={!isMasterUser}
                           />
                         </div>
                       </CardContent>
@@ -957,6 +1003,7 @@ export default function AdminSettings() {
                           <Switch
                             checked={siteConfig.showEvents}
                             onCheckedChange={(checked) => setSiteConfig(prev => ({ ...prev, showEvents: checked }))}
+                            disabled={!isMasterUser}
                           />
                         </div>
                         <div className="flex items-center justify-between">
@@ -967,6 +1014,7 @@ export default function AdminSettings() {
                           <Switch
                             checked={siteConfig.showBlog}
                             onCheckedChange={(checked) => setSiteConfig(prev => ({ ...prev, showBlog: checked }))}
+                            disabled={!isMasterUser}
                           />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -979,6 +1027,7 @@ export default function AdminSettings() {
                               onChange={(e) => setSiteConfig(prev => ({ ...prev, maxEvents: parseInt(e.target.value) || 6 }))}
                               min="1"
                               max="20"
+                              disabled={!isMasterUser}
                             />
                           </div>
                           <div>
@@ -990,6 +1039,7 @@ export default function AdminSettings() {
                               onChange={(e) => setSiteConfig(prev => ({ ...prev, maxBlogPosts: parseInt(e.target.value) || 3 }))}
                               min="1"
                               max="20"
+                              disabled={!isMasterUser}
                             />
                           </div>
                         </div>
@@ -1022,6 +1072,7 @@ export default function AdminSettings() {
                                       }
                                       setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
                                     }}
+                                    disabled={!isMasterUser}
                                   />
                                 </div>
                               </div>
@@ -1038,7 +1089,7 @@ export default function AdminSettings() {
                                       setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
                                     }}
                                     placeholder="View Events"
-                                    disabled={button.label === '' && button.href === ''}
+                                    disabled={!isMasterUser || (button.label === '' && button.href === '')}
                                   />
                                 </div>
                                 <div>
@@ -1052,7 +1103,7 @@ export default function AdminSettings() {
                                       setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
                                     }}
                                     placeholder="/events"
-                                    disabled={button.label === '' && button.href === ''}
+                                    disabled={!isMasterUser || (button.label === '' && button.href === '')}
                                   />
                                 </div>
                                 <div>
@@ -1064,7 +1115,7 @@ export default function AdminSettings() {
                                       newButtons[index] = { ...button, variant: val };
                                       setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
                                     }}
-                                    disabled={button.label === '' && button.href === ''}
+                                    disabled={!isMasterUser || (button.label === '' && button.href === '')}
                                   >
                                     <SelectTrigger id={`button-variant-${index}`}>
                                       <SelectValue />
@@ -1091,6 +1142,7 @@ export default function AdminSettings() {
                           <Button
                             variant="outline"
                             size="sm"
+                            disabled={!isMasterUser}
                             onClick={() => addNavigationItem()}
                           >
                             <Plus className="h-4 w-4 mr-2" />
@@ -1115,6 +1167,7 @@ export default function AdminSettings() {
                                   navigation={navigation}
                                   onUpdate={updateNavigationItem}
                                   onRemove={removeNavigationItem}
+                                  disabled={!isMasterUser}
                                 />
                               ))}
                             </SortableContext>

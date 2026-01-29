@@ -33,8 +33,10 @@ import {
   Image as ImageIcon,
   Smile,
   Loader2,
-  Filter
+  Filter,
+  Library
 } from 'lucide-react';
+import { MediaSelectorDialog } from './MediaSelectorDialog';
 import {
   Tooltip,
   TooltipContent,
@@ -318,6 +320,7 @@ export default function AdminNotes() {
     reposts: false,
     replies: false
   });
+  const [showMediaSelector, setShowMediaSelector] = useState(false);
 
   const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
 
@@ -461,8 +464,7 @@ export default function AdminNotes() {
     setEditorTab('edit');
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleFileUpload = async (files: File[]) => {
     if (!files || files.length === 0 || !user) return;
 
     const defaultBlossomRelay = blossomRelays[0];
@@ -480,7 +482,7 @@ export default function AdminNotes() {
     try {
       const urls: string[] = [];
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const uploader = new BlossomUploader({
           servers: [defaultBlossomRelay],
           signer: user.signer,
@@ -524,6 +526,35 @@ export default function AdminNotes() {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  const handleManualUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleFileUpload(Array.from(files));
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData.items)
+      .filter(item => item.kind === 'file')
+      .map(item => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFileUpload(files);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer.files)
+      .filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
+
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFileUpload(files);
     }
   };
 
@@ -669,6 +700,8 @@ export default function AdminNotes() {
                     ref={textareaRef}
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
+                    onPaste={handlePaste}
+                    onDrop={handleDrop}
                     placeholder="Write something... (Paste or drop media files to upload)"
                     className="min-h-[200px] resize-none"
                     required
@@ -733,7 +766,7 @@ export default function AdminNotes() {
                     className="hidden"
                     accept="image/*,video/*"
                     multiple
-                    onChange={handleFileUpload}
+                    onChange={handleManualUpload}
                   />
                   <TooltipProvider>
                     <Tooltip>
@@ -749,6 +782,22 @@ export default function AdminNotes() {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>Upload Media</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() => setShowMediaSelector(true)}
+                        >
+                          <Library className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Media Library</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
 
@@ -804,6 +853,27 @@ export default function AdminNotes() {
                       </div>
                     )}
                   </div>
+
+                  <MediaSelectorDialog
+                    open={showMediaSelector}
+                    onOpenChange={setShowMediaSelector}
+                    onSelect={(url) => {
+                      const textarea = textareaRef.current;
+                      if (textarea) {
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const newContent = content.slice(0, start) + '\n' + url + '\n' + content.slice(end);
+                        setContent(newContent);
+                        setTimeout(() => {
+                          textarea.focus();
+                          textarea.setSelectionRange(start + url.length + 2, start + url.length + 2);
+                        }, 0);
+                      } else {
+                        setContent(prev => prev + '\n' + url + '\n');
+                      }
+                      setShowMediaSelector(false);
+                    }}
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,16 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useToast } from '@/hooks/useToast';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Edit, Trash2, Eye, Layout, Share2, Search } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Layout, Share2, Search, Image as ImageIcon, Library, Loader2 } from 'lucide-react';
+import { MediaSelectorDialog } from './MediaSelectorDialog';
+import { BlossomUploader } from '@nostrify/nostrify/uploaders';
+import { useAppContext } from '@/hooks/useAppContext';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthor } from '@/hooks/useAuthor';
 import ReactMarkdown from 'react-markdown';
@@ -128,6 +137,7 @@ function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
 export default function AdminBlog() {
   const { nostr, publishRelays: initialPublishRelays } = useDefaultRelay();
   const { user } = useCurrentUser();
+  const { config } = useAppContext();
   const { mutateAsync: publishEvent } = useNostrPublish();
   const { toast } = useToast();
   const [isCreating, setIsCreating] = useState(false);
@@ -139,6 +149,129 @@ export default function AdminBlog() {
     content: '',
     published: false,
   });
+  const [showMediaSelector, setShowMediaSelector] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Derive blossom relays (same as AdminNotes)
+  const blossomRelays = useMemo(() => {
+    const storedRelays = config.siteConfig?.blossomRelays || [];
+    const excludedRelays = config.siteConfig?.excludedBlossomRelays || [];
+    const relays = [...storedRelays];
+    const defaultRelay = config.siteConfig?.defaultRelay;
+
+    if (defaultRelay) {
+      let normalizedDefault = defaultRelay.replace(/\/$/, '');
+      if (normalizedDefault.startsWith('wss://')) {
+        normalizedDefault = normalizedDefault.replace('wss://', 'https://');
+      } else if (normalizedDefault.startsWith('ws://')) {
+        normalizedDefault = normalizedDefault.replace('ws://', 'http://');
+      }
+
+      const isExcluded = excludedRelays.includes(normalizedDefault);
+
+      if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault) && !isExcluded) {
+        relays.unshift(normalizedDefault);
+      }
+    }
+
+    return relays;
+  }, [config.siteConfig?.blossomRelays, config.siteConfig?.defaultRelay, config.siteConfig?.excludedBlossomRelays]);
+
+  const handleFileUpload = async (files: File[]) => {
+    if (!files || files.length === 0 || !user) return;
+
+    const defaultBlossomRelay = blossomRelays[0];
+    if (!defaultBlossomRelay) {
+      toast({
+        title: 'No Blossom Server',
+        description: 'Please configure a Blossom server in Media settings first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const urls: string[] = [];
+
+      for (const file of files) {
+        const uploader = new BlossomUploader({
+          servers: [defaultBlossomRelay],
+          signer: user.signer,
+        });
+
+        const result = await uploader.upload(file);
+        if (result && result.length > 0) {
+          const urlTag = result.find((tag: string[]) => tag[0] === 'url');
+          if (urlTag && urlTag[1]) {
+            urls.push(urlTag[1]);
+          }
+        }
+      }
+
+      if (urls.length > 0) {
+        const urlText = urls.join('\n');
+        const textarea = textareaRef.current;
+        if (textarea) {
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const newContent = formData.content.slice(0, start) + '\n' + urlText + '\n' + formData.content.slice(end);
+          setFormData(prev => ({ ...prev, content: newContent }));
+        } else {
+          setFormData(prev => ({ ...prev, content: prev.content + '\n' + urlText }));
+        }
+
+        toast({
+          title: 'Upload Successful',
+          description: `Uploaded ${urls.length} file(s) to ${defaultBlossomRelay}`,
+        });
+      }
+    } catch (err) {
+      console.error('Upload failed:', err);
+      toast({
+        title: 'Upload Failed',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleManualUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleFileUpload(Array.from(files));
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData.items)
+      .filter(item => item.kind === 'file')
+      .map(item => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFileUpload(files);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer.files)
+      .filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
+
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFileUpload(files);
+    }
+  };
 
   // Initialize selected relays when publishRelays change
   useEffect(() => {
@@ -484,12 +617,80 @@ export default function AdminBlog() {
                     <TabsContent value="edit" className="mt-2">
                       <Textarea
                         id="content"
+                        ref={textareaRef}
                         value={formData.content}
                         onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                        placeholder="Write your post in Markdown..."
+                        onPaste={handlePaste}
+                        onDrop={handleDrop}
+                        placeholder="Write your post in Markdown... (Paste or drop media files to upload)"
                         className="min-h-[300px] font-mono"
                         required
                       />
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          className="hidden"
+                          accept="image/*,video/*"
+                          multiple
+                          onChange={handleManualUpload}
+                        />
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading}
+                              >
+                                {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Upload Media</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9"
+                                onClick={() => setShowMediaSelector(true)}
+                              >
+                                <Library className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Media Library</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
+                        <MediaSelectorDialog
+                          open={showMediaSelector}
+                          onOpenChange={setShowMediaSelector}
+                          onSelect={(url) => {
+                            const textarea = textareaRef.current;
+                            if (textarea) {
+                              const start = textarea.selectionStart;
+                              const end = textarea.selectionEnd;
+                              const newContent = formData.content.slice(0, start) + '\n' + url + '\n' + formData.content.slice(end);
+                              setFormData(prev => ({ ...prev, content: newContent }));
+                              setTimeout(() => {
+                                textarea.focus();
+                                textarea.setSelectionRange(start + url.length + 2, start + url.length + 2);
+                              }, 0);
+                            } else {
+                              setFormData(prev => ({ ...prev, content: prev.content + '\n' + url + '\n' }));
+                            }
+                            setShowMediaSelector(false);
+                          }}
+                        />
+                      </div>
                     </TabsContent>
                     <TabsContent value="preview" className="mt-2">
                       <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">

@@ -52,6 +52,8 @@ export interface AppConfig {
     excludedBlossomRelays?: string[];
     /** Order of zaplytics sections */
     zaplyticsSectionOrder?: string[];
+    /** Whether admin settings are read-only for non-master admins */
+    readOnlyAdminAccess?: boolean;
     /** Last time the site config was updated from/to Nostr */
     updatedAt?: number;
   };

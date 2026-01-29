@@ -53,6 +53,7 @@ const AppConfigSchema = z.object({
     blossomRelays: z.array(z.string()).optional(),
     excludedBlossomRelays: z.array(z.string()).optional(),
     updatedAt: z.number().optional(),
+    readOnlyAdminAccess: z.boolean().optional(),
   }).optional(),
   navigation: z.array(z.object({
     id: z.string(),
