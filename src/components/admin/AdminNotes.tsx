@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -29,7 +31,8 @@ import {
   Share2,
   Image as ImageIcon,
   Smile,
-  Loader2
+  Loader2,
+  Filter
 } from 'lucide-react';
 import {
   Dialog,
@@ -159,7 +162,8 @@ function NoteCard({
   gateway,
   onEdit,
   onDelete,
-  onPublish
+  onPublish,
+  hideIfNoEngagement
 }: {
   note: Note;
   user: { pubkey: string } | undefined;
@@ -167,8 +171,17 @@ function NoteCard({
   onEdit: (note: Note) => void;
   onDelete: (note: Note) => void;
   onPublish?: (note: Note) => void;
+  hideIfNoEngagement?: boolean;
 }) {
   const stats = useNoteStats(note.id, note.pubkey);
+
+  if (hideIfNoEngagement &&
+    !stats.isLoading &&
+    stats.reactions === 0 &&
+    stats.zaps === 0 &&
+    stats.reposts === 0) {
+    return null;
+  }
   const noteId = useMemo(() => {
     try {
       return nip19.noteEncode(note.id);
@@ -663,6 +676,7 @@ export default function AdminNotes() {
   const [activeTab, setActiveTab] = useState<'drafts' | 'published'>('published');
   const [isCreating, setIsCreating] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [showOnlyEngaged, setShowOnlyEngaged] = useState(false);
 
   const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
 
@@ -827,24 +841,38 @@ export default function AdminNotes() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'drafts' | 'published')}>
-        <TabsList className="grid w-fit grid-cols-2">
-          <TabsTrigger value="drafts">
-            Drafts
-            {draftNotes && draftNotes.length > 0 && (
-              <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
-                {draftNotes.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="published">
-            Published
-            {publishedNotes && publishedNotes.length > 0 && (
-              <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
-                {publishedNotes.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between">
+          <TabsList className="grid w-fit grid-cols-2">
+            <TabsTrigger value="drafts">
+              Drafts
+              {draftNotes && draftNotes.length > 0 && (
+                <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
+                  {draftNotes.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="published">
+              Published
+              {publishedNotes && publishedNotes.length > 0 && (
+                <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
+                  {publishedNotes.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          {activeTab === 'published' && (
+            <div className="flex items-center gap-2 bg-muted/30 px-3 py-1.5 rounded-lg border">
+              <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+              <Label htmlFor="engaged-filter" className="text-xs cursor-pointer">Engagement only</Label>
+              <Switch
+                id="engaged-filter"
+                checked={showOnlyEngaged}
+                onCheckedChange={setShowOnlyEngaged}
+              />
+            </div>
+          )}
+        </div>
 
         <TabsContent value="drafts" className="mt-4 space-y-4">
           {draftNotes?.map((note) => (
