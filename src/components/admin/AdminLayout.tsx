@@ -23,7 +23,8 @@ import {
   Rss,
   Zap,
   FileImage,
-  MessageCircle
+  MessageCircle,
+  HelpCircle
 } from 'lucide-react';
 
 export default function AdminLayout() {
@@ -49,6 +50,7 @@ export default function AdminLayout() {
     { name: 'Zaplytics', href: '/admin/zaplytics', icon: Zap },
     { name: 'Media', href: '/admin/media', icon: FileImage },
     { name: 'Pages', href: '/admin/pages', icon: FileCode },
+    { name: 'Help', href: '/admin/help', icon: HelpCircle },
     ...(canAccessSettings ? [
       { name: 'Site Settings', href: '/admin/settings', icon: Settings },
       { name: 'Admin Settings', href: '/admin/system-settings', icon: Shield }

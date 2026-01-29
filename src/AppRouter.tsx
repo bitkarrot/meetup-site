@@ -19,6 +19,7 @@ import AdminSystemSettingsPage from "./pages/admin/AdminSystemSettingsPage";
 import AdminMediaPage from "./pages/admin/AdminMediaPage";
 import AdminProfilePage from "./pages/admin/AdminProfilePage";
 import AdminLoginPage from "./pages/admin/AdminLoginPage";
+import AdminHelpPage from "./pages/admin/AdminHelpPage";
 
 // Public pages
 import EventsPage from "./pages/EventsPage";
@@ -69,6 +70,7 @@ export function AppRouter() {
           <Route path="system-settings" element={<AdminSystemSettingsPage />} />
           <Route path="media" element={<AdminMediaPage />} />
           <Route path="profile" element={<AdminProfilePage />} />
+          <Route path="help" element={<AdminHelpPage />} />
         </Route>
         <Route path="/admin/login" element={<AdminLoginPage />} />
 

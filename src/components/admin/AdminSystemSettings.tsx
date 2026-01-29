@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +9,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Save, Plus, Trash2, RefreshCw, User, Shield, ShieldAlert, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Save, Plus, Trash2, RefreshCw, User, Shield, ShieldAlert, CheckCircle2, AlertTriangle, RotateCcw, ExternalLink } from 'lucide-react';
 import { useRemoteNostrJson } from '@/hooks/useRemoteNostrJson';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -587,6 +588,7 @@ export default function AdminSystemSettings() {
           </p>
           <p className="text-sm text-muted-foreground">
             {isMasterUser ? " As the master user, you can assign roles." : " View only access."}
+            {" "}Learn more about <Link to="/admin/help" className="text-primary hover:underline inline-flex items-center gap-1 font-medium italic underline underline-offset-2">Admin Roles & Permissions <ExternalLink className="h-3 w-3" /></Link>
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
