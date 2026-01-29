@@ -48,6 +48,8 @@ export interface AppConfig {
     nip19Gateway?: string;
     /** Blossom relays for media storage */
     blossomRelays?: string[];
+    /** Blossom relays to exclude (e.g. if the default Nostr relay doesn't support Blossom) */
+    excludedBlossomRelays?: string[];
     /** Order of zaplytics sections */
     zaplyticsSectionOrder?: string[];
     /** Last time the site config was updated from/to Nostr */

@@ -14,8 +14,19 @@ interface NoteContentProps {
 
 function isImageUrl(url: string) {
   try {
-    const normalized = url.split('#')[0]?.split('?')[0] ?? url;
-    return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(normalized);
+    const urlObj = new URL(url);
+    const path = urlObj.pathname.split('#')[0]?.split('?')[0] ?? '';
+
+    // Check for common image extensions
+    if (/\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif)$/i.test(path)) return true;
+
+    // Check for Blossom-style SHA256 hashes (64 hex characters)
+    // Blossom URLs often look like https://server.com/sha256
+    const pathParts = path.split('/');
+    const lastPart = pathParts[pathParts.length - 1];
+    if (/^[0-9a-f]{64}$/i.test(lastPart)) return true;
+
+    return false;
   } catch {
     return false;
   }
@@ -23,8 +34,13 @@ function isImageUrl(url: string) {
 
 function isVideoUrl(url: string) {
   try {
-    const normalized = url.split('#')[0]?.split('?')[0] ?? url;
-    return /\.(mp4|webm|ogg|mov)$/i.test(normalized);
+    const urlObj = new URL(url);
+    const path = urlObj.pathname.split('#')[0]?.split('?')[0] ?? '';
+
+    // Check for common video extensions
+    if (/\.(mp4|webm|ogg|mov|m4v|avi|mkv|wmv)$/i.test(path)) return true;
+
+    return false;
   } catch {
     return false;
   }
@@ -32,9 +48,9 @@ function isVideoUrl(url: string) {
 
 /** Parses content of text note events so that URLs and hashtags are linkified. */
 export function NoteContent({
-  event, 
-  className, 
-}: NoteContentProps) {  
+  event,
+  className,
+}: NoteContentProps) {
   const { config } = useAppContext();
   const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
   const cleanGateway = gateway.endsWith('/') ? gateway.slice(0, -1) : gateway;
@@ -42,66 +58,79 @@ export function NoteContent({
   // Process the content to render mentions, links, etc.
   const content = useMemo(() => {
     const text = event.content;
-    
+
     // Regex to find URLs, Nostr references, and hashtags
-    const regex = /(https?:\/\/[^\s]+)|nostr:(npub1|note1|nprofile1|nevent1)([023456789acdefghjklmnpqrstuvwxyz]+)|(#\w+)/g;
-    
+    const urlRegex = /(https?:\/\/[^\s]+)/gi;
+    const nostrRegex = /nostr:(npub1|note1|nprofile1|nevent1|naddr1|nrelay1)([023456789acdefghjklmnpqrstuvwxyz]+)/gi;
+    const hashtagRegex = /(#\w+)/g;
+
+    // Combined regex for splitting
+    const regex = new RegExp(`${urlRegex.source}|${nostrRegex.source}|${hashtagRegex.source}`, 'gi');
+
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
     let keyCounter = 0;
-    
+
     while ((match = regex.exec(text)) !== null) {
-      const [fullMatch, url, nostrPrefix, nostrData, hashtag] = match;
+      const fullMatch = match[0];
+      const url = match[1];
+      const nostrPrefix = match[2];
+      const nostrData = match[3];
+      const hashtag = match[4];
       const index = match.index;
-      
+
       // Add text before this match
       if (index > lastIndex) {
         parts.push(text.substring(lastIndex, index));
       }
-      
+
       if (url) {
         // Handle URLs
-        if (isImageUrl(url)) {
+        const cleanUrl = url.replace(/[.,;!?]$/, ''); // Remove trailing punctuation
+        if (isImageUrl(cleanUrl)) {
           parts.push(
             <a
               key={`img-${keyCounter++}`}
-              href={url}
+              href={cleanUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="block"
+              className="block my-2"
             >
               <img
-                src={url}
+                src={cleanUrl}
                 alt=""
-                loading="lazy"
-                decoding="async"
-                className="mt-2 max-w-full rounded-md border"
+                referrerPolicy="no-referrer"
+                className="max-w-full h-auto rounded-lg border shadow-sm hover:opacity-95 transition-opacity"
+                onError={(e) => {
+                  // Fallback if image fails to load
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
               />
             </a>
           );
-        } else if (isVideoUrl(url)) {
+        } else if (isVideoUrl(cleanUrl)) {
           parts.push(
-            <div key={`video-${keyCounter++}`} className="mt-2 max-w-full">
+            <div key={`video-${keyCounter++}`} className="my-2 max-w-full">
               <video
-                src={url}
+                src={cleanUrl}
                 controls
                 playsInline
                 preload="metadata"
-                className="w-full rounded-md border"
+                className="w-full rounded-lg border shadow-sm"
               />
             </div>
           );
         } else {
           parts.push(
-            <a 
+            <a
               key={`url-${keyCounter++}`}
-              href={url}
+              href={cleanUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-500 hover:underline break-all"
             >
-              {url}
+              {cleanUrl}
             </a>
           );
         }
@@ -110,13 +139,13 @@ export function NoteContent({
         try {
           const nostrId = `${nostrPrefix}${nostrData}`;
           const decoded = nip19.decode(nostrId);
-          
+
           if (decoded.type === 'npub') {
             const pubkey = decoded.data;
             const npub = nip19.npubEncode(pubkey);
             parts.push(
-              <a 
-                key={`mention-${keyCounter++}`} 
+              <a
+                key={`mention-${keyCounter++}`}
                 href={`${cleanGateway}/${npub}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -128,8 +157,8 @@ export function NoteContent({
             const pubkey = decoded.data.pubkey;
             const nprofile = nip19.nprofileEncode(decoded.data);
             parts.push(
-              <a 
-                key={`mention-${keyCounter++}`} 
+              <a
+                key={`mention-${keyCounter++}`}
                 href={`${cleanGateway}/${nprofile}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -140,7 +169,7 @@ export function NoteContent({
           } else {
             // For other types, just show as a link
             parts.push(
-              <a 
+              <a
                 key={`nostr-${keyCounter++}`}
                 href={`${cleanGateway}/${nostrId}`}
                 target="_blank"
@@ -159,7 +188,7 @@ export function NoteContent({
         // Handle hashtags
         const tag = hashtag.slice(1); // Remove the #
         parts.push(
-          <Link 
+          <Link
             key={`hashtag-${keyCounter++}`}
             to={`/t/${tag}`}
             className="text-blue-500 hover:underline"
@@ -168,20 +197,20 @@ export function NoteContent({
           </Link>
         );
       }
-      
+
       lastIndex = index + fullMatch.length;
     }
-    
+
     // Add any remaining text
     if (lastIndex < text.length) {
       parts.push(text.substring(lastIndex));
     }
-    
+
     // If no special content was found, just use the plain text
     if (parts.length === 0) {
       parts.push(text);
     }
-    
+
     return parts;
   }, [event, cleanGateway]);
 
@@ -199,11 +228,11 @@ function NostrMention({ pubkey }: { pubkey: string }) {
   const displayName = author.data?.metadata?.name ?? genUserName(pubkey);
 
   return (
-    <span 
+    <span
       className={cn(
         "font-medium hover:underline",
-        hasRealName 
-          ? "text-blue-500" 
+        hasRealName
+          ? "text-blue-500"
           : "text-gray-500 hover:text-gray-700"
       )}
     >

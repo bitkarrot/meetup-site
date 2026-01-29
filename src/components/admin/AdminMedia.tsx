@@ -7,23 +7,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
-import { 
-  Server, 
-  Search, 
-  Upload, 
-  Plus, 
-  Trash2, 
-  Copy, 
-  ExternalLink, 
-  FileImage, 
-  FileVideo, 
-  ArrowUp, 
-  ArrowDown, 
+import {
+  Server,
+  Search,
+  Upload,
+  Plus,
+  Trash2,
+  Copy,
+  ExternalLink,
+  FileImage,
+  FileVideo,
+  ArrowUp,
+  ArrowDown,
   AlertCircle,
   Loader2,
   Play,
   List,
-  LayoutGrid
+  LayoutGrid,
+  RefreshCw
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -50,15 +51,16 @@ function ManageServersSection() {
   const { config, updateConfig } = useAppContext();
   const { toast } = useToast();
   const [newServer, setNewServer] = useState('');
-  
+
   // Stored relays from config
   const storedBlossomRelays = useMemo(() => config.siteConfig?.blossomRelays || [], [config.siteConfig?.blossomRelays]);
-  
+
   // Effective relays including derived default relay
   const blossomRelays = useMemo(() => {
     const relays = [...storedBlossomRelays];
+    const excludedRelays = config.siteConfig?.excludedBlossomRelays || [];
     const defaultRelay = config.siteConfig?.defaultRelay;
-    
+
     if (defaultRelay) {
       let normalizedDefault = defaultRelay.replace(/\/$/, '');
       if (normalizedDefault.startsWith('wss://')) {
@@ -66,14 +68,16 @@ function ManageServersSection() {
       } else if (normalizedDefault.startsWith('ws://')) {
         normalizedDefault = normalizedDefault.replace('ws://', 'http://');
       }
-      
-      if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault)) {
+
+      const isExcluded = excludedRelays.includes(normalizedDefault);
+
+      if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault) && !isExcluded) {
         relays.unshift(normalizedDefault);
       }
     }
-    
+
     return relays;
-  }, [storedBlossomRelays, config.siteConfig?.defaultRelay]);
+  }, [storedBlossomRelays, config.siteConfig?.defaultRelay, config.siteConfig?.excludedBlossomRelays]);
 
   const handleAddServer = () => {
     if (!newServer) return;
@@ -81,7 +85,7 @@ function ManageServersSection() {
     if (!url.startsWith('http')) {
       url = 'https://' + url;
     }
-    
+
     // Remove trailing slash
     url = url.replace(/\/$/, '');
 
@@ -90,25 +94,46 @@ function ManageServersSection() {
       return;
     }
 
-    updateConfig((prev) => ({
-      ...prev,
-      siteConfig: {
-        ...prev.siteConfig,
-        blossomRelays: [...storedBlossomRelays, url]
-      }
-    }));
+    updateConfig((prev) => {
+      const excluded = prev.siteConfig?.excludedBlossomRelays || [];
+      const newExcluded = excluded.filter(r => r !== url);
+
+      return {
+        ...prev,
+        siteConfig: {
+          ...prev.siteConfig,
+          blossomRelays: [...storedBlossomRelays, url],
+          excludedBlossomRelays: newExcluded.length > 0 ? newExcluded : undefined
+        }
+      };
+    });
     setNewServer('');
     toast({ title: "Success", description: "Server added" });
   };
 
   const handleRemoveServer = (url: string) => {
-    updateConfig((prev) => ({
-      ...prev,
-      siteConfig: {
-        ...prev.siteConfig,
-        blossomRelays: storedBlossomRelays.filter(r => r !== url)
+    const isStored = storedBlossomRelays.includes(url);
+
+    updateConfig((prev) => {
+      const newStored = (prev.siteConfig?.blossomRelays || []).filter(r => r !== url);
+      const newExcluded = [...(prev.siteConfig?.excludedBlossomRelays || [])];
+
+      if (!isStored) {
+        // If it wasn't stored, it must be the default relay, so we exclude it
+        if (!newExcluded.includes(url)) {
+          newExcluded.push(url);
+        }
       }
-    }));
+
+      return {
+        ...prev,
+        siteConfig: {
+          ...prev.siteConfig,
+          blossomRelays: newStored,
+          excludedBlossomRelays: newExcluded.length > 0 ? newExcluded : undefined
+        }
+      };
+    });
     toast({ title: "Success", description: "Server removed" });
   };
 
@@ -118,7 +143,7 @@ function ManageServersSection() {
     // If the item being moved is the derived one, we might need to handle it differently or just disable moving for derived items
     const relayToMove = blossomRelays[index];
     const isStored = storedBlossomRelays.includes(relayToMove);
-    
+
     if (!isStored) {
       toast({ title: "Info", description: "Default relay position cannot be changed manually" });
       return;
@@ -126,11 +151,11 @@ function ManageServersSection() {
 
     const storedIndex = storedBlossomRelays.indexOf(relayToMove);
     const targetStoredIndex = direction === 'up' ? storedIndex - 1 : storedIndex + 1;
-    
+
     if (targetStoredIndex < 0 || targetStoredIndex >= newRelays.length) return;
-    
+
     [newRelays[storedIndex], newRelays[targetStoredIndex]] = [newRelays[targetStoredIndex], newRelays[storedIndex]];
-    
+
     updateConfig((prev) => ({
       ...prev,
       siteConfig: {
@@ -163,7 +188,7 @@ function ManageServersSection() {
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => moveServer(index, 'down')} disabled={index === blossomRelays.length - 1 || !storedBlossomRelays.includes(url)}>
                   <ArrowDown className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleRemoveServer(url)} disabled={!storedBlossomRelays.includes(url)}>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleRemoveServer(url)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -177,8 +202,8 @@ function ManageServersSection() {
         </div>
 
         <div className="flex gap-2">
-          <Input 
-            placeholder="https://blossom.example.com" 
+          <Input
+            placeholder="https://blossom.example.com"
             value={newServer}
             onChange={(e) => setNewServer(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAddServer()}
@@ -200,7 +225,29 @@ function BrowseMediaSection() {
   const { config } = useAppContext();
   const { user } = useCurrentUser();
   const { toast } = useToast();
-  const blossomRelays = useMemo(() => config.siteConfig?.blossomRelays || [], [config.siteConfig?.blossomRelays]);
+  const blossomRelays = useMemo(() => {
+    const stored = config.siteConfig?.blossomRelays || [];
+    const excluded = config.siteConfig?.excludedBlossomRelays || [];
+    const defaultRelay = config.siteConfig?.defaultRelay;
+
+    const relays = [...stored];
+    if (defaultRelay) {
+      let normalizedDefault = defaultRelay.replace(/\/$/, '');
+      if (normalizedDefault.startsWith('wss://')) {
+        normalizedDefault = normalizedDefault.replace('wss://', 'https://');
+      } else if (normalizedDefault.startsWith('ws://')) {
+        normalizedDefault = normalizedDefault.replace('ws://', 'http://');
+      }
+
+      const isExcluded = excluded.includes(normalizedDefault);
+
+      if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault) && !isExcluded) {
+        relays.unshift(normalizedDefault);
+      }
+    }
+    return relays;
+  }, [config.siteConfig?.blossomRelays, config.siteConfig?.defaultRelay, config.siteConfig?.excludedBlossomRelays]);
+
   const [selectedRelay, setSelectedRelay] = useState<string>('');
 
   useEffect(() => {
@@ -211,13 +258,13 @@ function BrowseMediaSection() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [mediaType, setMediaType] = useState<'all' | 'image' | 'video'>('all');
 
-  const { data: blobs, isLoading, error } = useQuery({
+  const { data: blobs, isLoading, error, refetch } = useQuery({
     queryKey: ['blossom-blobs', selectedRelay, user?.pubkey],
     queryFn: async () => {
       if (!selectedRelay || !user?.pubkey) return [];
-      
+
       const headers: Record<string, string> = {};
-      
+
       // Some Blossom servers require authentication for listing blobs
       if (user.signer) {
         try {
@@ -250,7 +297,7 @@ function BrowseMediaSection() {
       if (mediaType === 'video') return blob.type?.startsWith('video/');
       return true;
     }) || [];
-    
+
     // Sort by date (newest first)
     return [...filtered].sort((a, b) => (b.uploaded || 0) - (a.uploaded || 0));
   }, [blobs, mediaType]);
@@ -267,27 +314,37 @@ function BrowseMediaSection() {
           <div className="flex items-center justify-between">
             <CardTitle>Browse Media</CardTitle>
             <div className="flex items-center gap-2">
-              <Button 
-                variant={viewMode === 'list' ? 'default' : 'outline'} 
-                size="icon" 
+              <Button
+                variant={viewMode === 'list' ? 'default' : 'outline'}
+                size="icon"
                 className="h-8 w-8"
                 onClick={() => setViewMode('list')}
               >
                 <List className="h-4 w-4" />
               </Button>
-              <Button 
-                variant={viewMode === 'grid' ? 'default' : 'outline'} 
-                size="icon" 
+              <Button
+                variant={viewMode === 'grid' ? 'default' : 'outline'}
+                size="icon"
                 className="h-8 w-8"
                 onClick={() => setViewMode('grid')}
               >
                 <LayoutGrid className="h-4 w-4" />
               </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 ml-2"
+                onClick={() => refetch()}
+                disabled={isLoading}
+                title="Refresh media"
+              >
+                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
             {blossomRelays.map(relay => (
-              <Button 
+              <Button
                 key={relay}
                 variant={selectedRelay === relay ? 'default' : 'outline'}
                 size="sm"
@@ -371,7 +428,7 @@ function BrowseMediaSection() {
                   <div key={blob.sha256} className="flex items-center gap-4 px-4 py-2 hover:bg-muted/50 transition-colors rounded-md group">
                     <div className="flex-1 flex items-center gap-3 overflow-hidden">
                       <div className="h-6 w-6 rounded border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
-                         {blob.type?.startsWith('image/') ? (
+                        {blob.type?.startsWith('image/') ? (
                           <img src={blob.url} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <div className="h-full w-full flex items-center justify-center">
@@ -379,18 +436,18 @@ function BrowseMediaSection() {
                           </div>
                         )}
                       </div>
-                      <a 
-                        href={blob.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
+                      <a
+                        href={blob.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="text-sm font-mono text-primary hover:underline truncate"
                       >
                         {blob.sha256.slice(0, 16)}...
                       </a>
                     </div>
                     <div className="w-24 text-right text-xs text-muted-foreground font-mono">
-                      {blob.size > 1024 * 1024 
-                        ? `${(blob.size / (1024 * 1024)).toFixed(1)} MB` 
+                      {blob.size > 1024 * 1024
+                        ? `${(blob.size / (1024 * 1024)).toFixed(1)} MB`
                         : `${(blob.size / 1024).toFixed(1)} KB`}
                     </div>
                     <div className="w-32 text-right text-xs text-muted-foreground font-mono">
@@ -420,8 +477,29 @@ function UploadMediaSection() {
   const { user } = useCurrentUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const blossomRelays = useMemo(() => config.siteConfig?.blossomRelays || [], [config.siteConfig?.blossomRelays]);
-  
+  const blossomRelays = useMemo(() => {
+    const stored = config.siteConfig?.blossomRelays || [];
+    const excluded = config.siteConfig?.excludedBlossomRelays || [];
+    const defaultRelay = config.siteConfig?.defaultRelay;
+
+    const relays = [...stored];
+    if (defaultRelay) {
+      let normalizedDefault = defaultRelay.replace(/\/$/, '');
+      if (normalizedDefault.startsWith('wss://')) {
+        normalizedDefault = normalizedDefault.replace('wss://', 'https://');
+      } else if (normalizedDefault.startsWith('ws://')) {
+        normalizedDefault = normalizedDefault.replace('ws://', 'http://');
+      }
+
+      const isExcluded = excluded.includes(normalizedDefault);
+
+      if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault) && !isExcluded) {
+        relays.unshift(normalizedDefault);
+      }
+    }
+    return relays;
+  }, [config.siteConfig?.blossomRelays, config.siteConfig?.defaultRelay, config.siteConfig?.excludedBlossomRelays]);
+
   const [selectedRelays, setSelectedRelays] = useState<string[]>(blossomRelays);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -457,7 +535,7 @@ function UploadMediaSection() {
         // The BlossomUploader from nostrify handles multiple servers
         // but we want to show some progress if possible
         await uploader.upload(file);
-        
+
         completedSteps += selectedRelays.length;
         setUploadProgress((completedSteps / totalSteps) * 100);
       }
@@ -481,17 +559,17 @@ function UploadMediaSection() {
         <CardDescription>Upload images or videos to one or multiple Blossom servers.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div 
+        <div
           className={cn(
             "group relative border-2 border-dashed rounded-xl p-12 text-center transition-colors",
             isUploading ? "opacity-50 pointer-events-none" : "hover:border-primary/50 hover:bg-muted/50 cursor-pointer"
           )}
           onClick={() => fileInputRef.current?.click()}
         >
-          <input 
-            type="file" 
-            className="hidden" 
-            ref={fileInputRef} 
+          <input
+            type="file"
+            className="hidden"
+            ref={fileInputRef}
             onChange={handleUpload}
             multiple
             accept="image/*,video/*"
@@ -514,8 +592,8 @@ function UploadMediaSection() {
           <div className="grid gap-2 sm:grid-cols-2">
             {blossomRelays.map((relay) => (
               <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
-                <Checkbox 
-                  id={`upload-relay-${relay}`} 
+                <Checkbox
+                  id={`upload-relay-${relay}`}
                   checked={selectedRelays.includes(relay)}
                   onCheckedChange={(checked) => {
                     if (checked) {

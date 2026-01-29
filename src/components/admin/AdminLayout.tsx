@@ -20,7 +20,8 @@ import {
   Shield,
   Rss,
   Zap,
-  FileImage
+  FileImage,
+  MessageCircle
 } from 'lucide-react';
 
 export default function AdminLayout() {
@@ -34,6 +35,7 @@ export default function AdminLayout() {
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+    { name: 'Notes', href: '/admin/notes', icon: MessageCircle },
     { name: 'Blog Posts', href: '/admin/blog', icon: FileText },
     { name: 'Events', href: '/admin/events', icon: Calendar },
     { name: 'Feed', href: '/admin/feed', icon: Rss },
@@ -144,13 +146,13 @@ export default function AdminLayout() {
               >
                 {theme === 'dark' ? (
                   <>
-                  <Sun className="h-5 w-5 mr-3" />
-                  {/* <span className="ml-2">Light</span> */}
+                    <Sun className="h-5 w-5 mr-3" />
+                    {/* <span className="ml-2">Light</span> */}
                   </>
                 ) : (<>
                   <Moon className="h-5 w-5 mr-3" />
                   {/* <span className="ml-2">Dark</span> */}
-                  </>)}
+                </>)}
 
 
               </Button>

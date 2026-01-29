@@ -1,4 +1,4 @@
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -885,9 +885,8 @@ export function useZapperProfiles(pubkeys: string[]) {
  * Main hook that combines all zap data and provides analytics with progressive loading
  */
 export function useZapAnalytics(timeRange: TimeRange = '7d', customRange?: CustomDateRange, targetPubkey?: string) {
-  // Don't start loading data for custom range until both dates are selected, 
-  // and don't load anything if no target pubkey is provided
-  const shouldQueryData = (timeRange !== 'custom' || (customRange?.from && customRange?.to)) && !!targetPubkey;
+  // Don't start loading data for custom range until both dates are selected
+  const shouldQueryData = timeRange !== 'custom' || (customRange?.from && customRange?.to);
 
   const progressiveData = useProgressiveZapReceipts(
     shouldQueryData ? timeRange : '7d', // fallback to 7d when custom is incomplete
@@ -1070,7 +1069,6 @@ export function useZapAnalytics(timeRange: TimeRange = '7d', customRange?: Custo
       };
     },
     enabled: Boolean(shouldQueryData),
-    placeholderData: keepPreviousData,
     staleTime: ZAP_FETCH_CONFIG.STALE_TIME,
     refetchOnWindowFocus: false,
     refetchInterval: false,

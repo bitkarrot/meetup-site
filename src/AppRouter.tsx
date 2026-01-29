@@ -8,6 +8,7 @@ import NotFound from "./pages/NotFound";
 // Admin pages
 import AdminWrapper from "./pages/admin/AdminWrapper";
 import AdminPage from "./pages/admin/AdminPage";
+import AdminNotesPage from "./pages/admin/AdminNotesPage";
 import AdminBlogPage from "./pages/admin/AdminBlogPage";
 import AdminEventsPage from "./pages/admin/AdminEventsPage";
 import AdminFeedPage from "./pages/admin/AdminFeedPage";
@@ -54,10 +55,11 @@ export function AppRouter() {
         <Route path="/about" element={<StaticPage pathOverride="/about" />} />
         <Route path="/contact" element={<StaticPage pathOverride="/contact" />} />
         <Route path="/p/:path" element={<StaticPage />} />
-        
+
         {/* Admin routes */}
         <Route path="/admin" element={<AdminRoutes />}>
           <Route index element={<AdminPage />} />
+          <Route path="notes" element={<AdminNotesPage />} />
           <Route path="blog" element={<AdminBlogPage />} />
           <Route path="events" element={<AdminEventsPage />} />
           <Route path="feed" element={<AdminFeedPage />} />

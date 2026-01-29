@@ -156,10 +156,13 @@ export default function AdminBlog() {
 
       // If user is logged in, also fetch their private drafts (Kind 31234)
       if (user?.pubkey) {
-        filters.push({ kinds: [31234], authors: [user.pubkey], limit: 50 });
+        filters.push({ kinds: [31234], authors: [user.pubkey], '#k': ['30023'], limit: 50 });
       }
 
-      const events = await nostr.query(filters, { signal });
+      const events = (await nostr.query(filters, { signal })).filter(event =>
+        event.kind === 30023 ||
+        (event.kind === 31234 && event.tags.some(([name, value]) => name === 'k' && value === '30023'))
+      );
 
       const processedPosts = await Promise.all(events.map(async (event) => {
         const tags = event.tags || [];

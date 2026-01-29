@@ -13,10 +13,28 @@ export function useUploadFile() {
         throw new Error('Must be logged in to upload files');
       }
 
+      const storedRelays = config.siteConfig?.blossomRelays || [];
+      const excludedRelays = config.siteConfig?.excludedBlossomRelays || [];
+      const defaultRelay = config.siteConfig?.defaultRelay;
+
+      const relays = [...storedRelays];
+      if (defaultRelay) {
+        let normalizedDefault = defaultRelay.replace(/\/$/, '');
+        if (normalizedDefault.startsWith('wss://')) {
+          normalizedDefault = normalizedDefault.replace('wss://', 'https://');
+        } else if (normalizedDefault.startsWith('ws://')) {
+          normalizedDefault = normalizedDefault.replace('ws://', 'http://');
+        }
+
+        const isExcluded = excludedRelays.includes(normalizedDefault);
+
+        if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault) && !isExcluded) {
+          relays.unshift(normalizedDefault);
+        }
+      }
+
       const uploader = new BlossomUploader({
-        servers: config.siteConfig?.blossomRelays || [
-          'https://blossom.primal.net/',
-        ],
+        servers: relays.length > 0 ? relays : ['https://blossom.primal.net/'],
         signer: user.signer,
       });
 

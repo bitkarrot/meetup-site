@@ -51,6 +51,7 @@ const AppConfigSchema = z.object({
     feedNpubs: z.array(z.string()).optional(),
     feedReadFromPublishRelays: z.boolean().optional(),
     blossomRelays: z.array(z.string()).optional(),
+    excludedBlossomRelays: z.array(z.string()).optional(),
     updatedAt: z.number().optional(),
   }).optional(),
   navigation: z.array(z.object({
@@ -78,12 +79,12 @@ export function AppProvider(props: AppProviderProps) {
       serialize: JSON.stringify,
       deserialize: (value: string) => {
         const parsed = JSON.parse(value);
-        
+
         // Data migration: Handle old navigation object format
         if (parsed && typeof parsed === 'object' && parsed.navigation && typeof parsed.navigation === 'object' && !Array.isArray(parsed.navigation) && 'navigation' in parsed.navigation) {
           parsed.navigation = (parsed.navigation as Record<string, unknown>).navigation;
         }
-        
+
         return AppConfigSchema.partial().parse(parsed);
       }
     }
@@ -97,13 +98,13 @@ export function AppProvider(props: AppProviderProps) {
   const config = useMemo(() => {
     // Start with defaultConfig
     const merged = { ...defaultConfig };
-    
+
     const masterPubkey = (import.meta.env.VITE_MASTER_PUBKEY || '').toLowerCase().trim();
 
     // Merge rawConfig (localStorage)
     if (rawConfig.theme) merged.theme = rawConfig.theme;
     if (rawConfig.relayMetadata) merged.relayMetadata = rawConfig.relayMetadata;
-    
+
     // Deep merge siteConfig to ensure we don't lose defaults
     if (defaultConfig.siteConfig || rawConfig.siteConfig) {
       merged.siteConfig = {
@@ -124,10 +125,10 @@ export function AppProvider(props: AppProviderProps) {
         };
       }
     }
-    
+
     // Use rawConfig navigation if it exists, otherwise defaultConfig
     if (rawConfig.navigation) merged.navigation = rawConfig.navigation;
-    
+
     return merged;
   }, [defaultConfig, rawConfig]);
 
@@ -330,7 +331,7 @@ function processThemeCss(css: any): string {
  */
 function useGlobalSeo(config: AppConfig) {
   const siteConfig = config.siteConfig;
-  
+
   useHead({
     link: [
       {

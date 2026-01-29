@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
 import { Users } from 'lucide-react';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useAuthor } from '@/hooks/useAuthor';
@@ -57,10 +56,9 @@ export default function AdminZaplytics() {
   const { config, updateConfig } = useAppContext();
   const feedNpubs = config.siteConfig?.feedNpubs || [];
 
-  const [selectedPubkey, setSelectedPubkey] = useState<string>('');
+  const [selectedPubkey, setSelectedPubkey] = useState<string>(feedNpubs[0] || '');
   const [timeRange, setTimeRange] = useState<TimeRange>('24h');
   const [customRange, setCustomRange] = useState<CustomDateRange | undefined>();
-  const [hasStarted, setHasStarted] = useState(false);
   const [sectionOrder, setSectionOrder] = useState<string[]>(() =>
     config.siteConfig?.zaplyticsSectionOrder ?? [
       'stats',
@@ -113,25 +111,15 @@ export default function AdminZaplytics() {
   } = useZapAnalytics(
     timeRange,
     customRange,
-    hasStarted && selectedPubkey ? selectedPubkey : undefined
+    selectedPubkey
   );
 
   // Only show skeletons on the very first load for a selected user
   const isLoading = queryLoading && (!analytics || (analytics as any).totalZaps === 0);
 
-  const handleStartAnalytics = () => {
-    if (selectedPubkey && !isCustomRangeIncomplete) {
-      setHasStarted(true);
-    }
-  };
 
-  // Reset hasStarted when user changes to require a re-click or different behavior
-  // Or just let it auto-load once they've started once? 
-  // The user said "until the user choses... and selects", so maybe every time they change we wait?
-  // Let's keep it simple: once they click "Show", it stays "showing" for that session until they change user.
   const onUserChange = (pubkey: string) => {
     setSelectedPubkey(pubkey);
-    setHasStarted(false); // Reset to require another click
   };
 
   return (
@@ -162,20 +150,14 @@ export default function AdminZaplytics() {
 
           <TimeRangeButtons
             value={timeRange}
-            onChange={(val) => {
-              setTimeRange(val);
-              setHasStarted(false); // Reset to require another click
-            }}
+            onChange={setTimeRange}
             customRange={customRange}
-            onCustomRangeChange={(val) => {
-              setCustomRange(val);
-              setHasStarted(false); // Reset to require another click
-            }}
+            onCustomRangeChange={setCustomRange}
           />
         </div>
       </div>
 
-      {!hasStarted ? (
+      {!selectedPubkey ? (
         <Card className="bg-muted/30 border-dashed">
           <CardContent className="py-16 text-center space-y-4">
             <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
@@ -184,17 +166,9 @@ export default function AdminZaplytics() {
             <div className="max-w-md mx-auto space-y-2">
               <h3 className="text-lg font-semibold text-foreground">Ready to analyze zaps?</h3>
               <p className="text-muted-foreground">
-                Select a community member and a time range above to view their zap earnings and analytics.
+                Select a community member from the dropdown above to view their zap earnings and analytics.
               </p>
             </div>
-            <Button
-              size="lg"
-              onClick={handleStartAnalytics}
-              disabled={!selectedPubkey || isCustomRangeIncomplete}
-              className="px-8"
-            >
-              Show Analytics
-            </Button>
           </CardContent>
         </Card>
       ) : (
