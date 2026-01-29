@@ -904,6 +904,7 @@ export default function AdminNotes() {
               gateway={gateway}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              hideIfNoEngagement={showOnlyEngaged}
             />
           ))}
           {(!publishedNotes || publishedNotes.length === 0) && (
