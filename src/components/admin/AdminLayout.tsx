@@ -24,7 +24,8 @@ import {
   Zap,
   FileImage,
   MessageCircle,
-  HelpCircle
+  HelpCircle,
+  Bot
 } from 'lucide-react';
 
 export default function AdminLayout() {
@@ -43,6 +44,7 @@ export default function AdminLayout() {
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+    { name: 'AI Chat', href: '/admin/chat', icon: Bot },
     { name: 'Notes', href: '/admin/notes', icon: MessageCircle },
     { name: 'Blog Posts', href: '/admin/blog', icon: FileText },
     { name: 'Events', href: '/admin/events', icon: Calendar },

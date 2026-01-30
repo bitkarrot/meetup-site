@@ -21,6 +21,8 @@ import AdminProfilePage from "./pages/admin/AdminProfilePage";
 import AdminLoginPage from "./pages/admin/AdminLoginPage";
 import AdminHelpPage from "./pages/admin/AdminHelpPage";
 
+import AdminAIChatPage from "./pages/admin/AdminAIChatPage";
+
 // Public pages
 import EventsPage from "./pages/EventsPage";
 import EventPage from "./pages/EventPage";
@@ -60,6 +62,7 @@ export function AppRouter() {
         {/* Admin routes */}
         <Route path="/admin" element={<AdminRoutes />}>
           <Route index element={<AdminPage />} />
+          <Route path="chat" element={<AdminAIChatPage />} />
           <Route path="notes" element={<AdminNotesPage />} />
           <Route path="blog" element={<AdminBlogPage />} />
           <Route path="events" element={<AdminEventsPage />} />
