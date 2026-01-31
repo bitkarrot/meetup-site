@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swarm Dashboard</title>
+    <script src="https://unpkg.com/nostr-tools@2.10.4/lib/nostr.bundle.js"></script>
+    <script src="https://unpkg.com/nostr-login@latest/dist/unpkg.js" data-dark-mode="true" data-methods="extension,connect,readOnly" data-no-banner="true"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .login-header h1 {
+            color: #4a5568;
+            margin-bottom: 0.5rem;
+        }
+
+        .login-header p {
+            color: #718096;
+            font-size: 0.9rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #4a5568;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #5a67d8;
+        }
+
+        .dashboard-container {
+            display: none;
+        }
+
+        .error {
+            color: #e53e3e;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        @media (max-width: 768px) {
+            .login-card {
+                margin: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <h1>🔐 Swarm Dashboard</h1>
+            </div>
+            
+            <!-- Nostr Login Section -->
+            <div id="nostrLoginSection">
+                <button 
+                    type="button" 
+                    id="nostrLoginBtn"
+                    class="btn"
+                    style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;"
+                >
+                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+                    </svg>
+                    Login with Nostr Extension
+                </button>
+                <p style="margin-top: 1rem; text-align: center; color: #718096; font-size: 0.9rem;">
+                        Login to access the dashboard.
+                        Requires relay operator pubkey access
+                </p>
+                <p style="margin-top: 1rem; text-align: center; color: #718096; font-size: 0.9rem;"> Back to <a href="/" style="color: #6366f1; text-decoration: underline;">home</a></p>
+                <div id="loginError" class="error" style="text-align: center; margin-top: 1rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard (Content will be loaded dynamically) -->
+    <div id="dashboard" class="dashboard-container"></div>
+
+    <script>
+        // Global state (shared with dynamic content)
+        window.currentData = {
+            relayName: '',
+            relayDescription: '',
+            users: {},
+            environment: {},
+            isRemote: false
+        };
+        window.currentUserPubkey = '';
+
+        // Nostr Login Integration
+        const nostrLoginSection = document.getElementById('nostrLoginSection');
+        const nostrLoginBtn = document.getElementById('nostrLoginBtn');
+        const loginError = document.getElementById('loginError');
+
+        // Handle nostr-login auth events
+        document.addEventListener('nlAuth', async (e) => {
+            if (e.detail.type === 'login' || e.detail.type === 'signup') {
+                // User logged in - get their pubkey
+                try {
+                    const hexPubkey = await window.nostr.getPublicKey();
+                    await attemptLogin(hexPubkey);
+                } catch (err) {
+                    console.error('Failed to get pubkey:', err);
+                    loginError.textContent = 'Failed to get pubkey from extension: ' + err.message;
+                }
+            } else if (e.detail.type === 'logout') {
+                // User logged out - show login screen
+                document.getElementById('loginScreen').style.display = 'flex';
+                document.getElementById('dashboard').style.display = 'none';
+                loginError.textContent = '';
+            }
+        });
+
+        // Login button opens nostr-login modal
+        nostrLoginBtn.addEventListener('click', () => {
+            document.dispatchEvent(new CustomEvent('nlLaunch', { detail: 'welcome' }));
+        });
+
+        // Central login function
+        async function attemptLogin(pubkey) {
+            loginError.textContent = '';
+            
+            try {
+                const response = await fetch('/api/dashboard/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ pubkey })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentData = data;
+                    currentUserPubkey = pubkey;
+                    showDashboard();
+                } else {
+                    const error = await response.json();
+                    
+                    // Show unauthorized error in a dialog and flush storage
+                    if (response.status === 401) {
+                        alert(error.error || 'Access denied. Only the relay operator can login.');
+                        // Flush storage
+                        localStorage.clear();
+                        sessionStorage.clear();
+                        window.location.reload();
+                        return;
+                    }
+                    
+                    loginError.textContent = error.error || 'Login failed';
+                }
+            } catch (err) {
+                loginError.textContent = 'Network error: ' + err.message;
+            }
+        }
+
+        // Show dashboard
+        async function showDashboard() {
+            try {
+                // Fetch the protected dashboard UI
+                const uiResponse = await fetch('/api/dashboard/ui');
+                if (!uiResponse.ok) {
+                    throw new Error('Failed to load dashboard UI');
+                }
+                const uiHtml = await uiResponse.text();
+
+                // Hide login, show dashboard container, and inject UI
+                document.getElementById('loginScreen').style.display = 'none';
+                const dashboardContainer = document.getElementById('dashboard');
+                dashboardContainer.style.display = 'block';
+                dashboardContainer.innerHTML = uiHtml;
+
+                // The script in the injected HTML will execute if it's handled correctly.
+                // Since we're injecting into innerHTML, scripts won't run automatically.
+                // We'll need to manually execute the script or use a different injection method.
+                const scripts = dashboardContainer.getElementsByTagName('script');
+                for (let script of scripts) {
+                    const newScript = document.createElement('script');
+                    newScript.textContent = script.textContent;
+                    document.body.appendChild(newScript);
+                }
+            } catch (err) {
+                console.error('Error showing dashboard:', err);
+                loginError.textContent = 'Error loading dashboard: ' + err.message;
+            }
+        }
+
+        // Logout
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            // Trigger nostr-login logout if available
+            if (window.nostrLogin) {
+                document.dispatchEvent(new CustomEvent('nlLogout'));
+            }
+            
+            // Clear all local storage and session storage
+            localStorage.clear();
+            sessionStorage.clear();
+            currentUserPubkey = '';
+            
+            // Show login screen
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
+            loginError.textContent = '';
+            
+            // Refresh page to ensure clean state
+            window.location.reload();
+        });
+
+        // Utility functions for pubkey display (using nostr-tools)
+        window.hexToNpub = function(hex) {
+            try {
+                return NostrTools.nip19.npubEncode(hex);
+            } catch (err) {
+                console.error('Error converting hex to npub:', err);
+                return null;
+            }
+        }
+
+        window.npubToHex = function(npub) {
+            try {
+                const decoded = NostrTools.nip19.decode(npub);
+                if (decoded.type !== 'npub') {
+                    throw new Error('Not an npub');
+                }
+                return decoded.data;
+            } catch (err) {
+                console.error('Error converting npub to hex:', err);
+                return null;
+            }
+        }
+
+        // Helper function to validate hex format
+        window.isValidHex = function(str) {
+            return /^[0-9a-fA-F]{64}$/.test(str);
+        }
+    </script>
+</body>
+</html>
