@@ -1,0 +1,42 @@
+services:
+  relay:
+    build:
+      context: ./swarm
+      dockerfile: Dockerfile
+    container_name: swarm_relay
+    ports:
+      - "3334:3334"
+    environment:
+      RELAY_NAME: ${RELAY_NAME:-Swarm Relay}
+      RELAY_PUBKEY: ${RELAY_PUBKEY}
+      RELAY_DESCRIPTION: ${RELAY_DESCRIPTION:-Swarm Relay Backend}
+      RELAY_PORT: "3334"
+      DB_ENGINE: ${DB_ENGINE:-badger}
+      DB_PATH: /app/db/
+
+      # Disable frontend serving in relay (separated mode)
+      SERVE_FRONTEND: "false"
+
+      # Blossom configuration
+      BLOSSOM_ENABLED: ${BLOSSOM_ENABLED:-true}
+      BLOSSOM_PATH: ${BLOSSOM_PATH:-blossom/}
+      BLOSSOM_URL: ${BLOSSOM_URL:-http://localhost:3334}
+    volumes:
+      - relay_data:/app/db
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: nostr_cms
+    ports:
+      - "8080:80"
+    environment:
+      VITE_DEFAULT_RELAY: ${VITE_DEFAULT_RELAY:-ws://relay:3334}
+      VITE_REMOTE_NOSTR_JSON_URL: ${VITE_REMOTE_NOSTR_JSON_URL:-}
+      VITE_MASTER_PUBKEY: ${VITE_MASTER_PUBKEY:-}
+    depends_on:
+      - relay
+
+volumes:
+  relay_data:
