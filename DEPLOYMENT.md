@@ -87,7 +87,7 @@ EOF
 
 **Step 4: Run Relay with Embedded Frontend**
 ```bash
-go run main.go
+go run .
 ```
 
 Access at: `http://localhost:3334`
