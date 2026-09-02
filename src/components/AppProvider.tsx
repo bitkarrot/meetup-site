@@ -14,9 +14,11 @@ interface AppProviderProps {
 }
 
 // Zod schema for RelayMetadata validation
+// Use z.string() instead of z.string().url() so a single bad URL doesn't
+// break the entire config parse. Invalid URLs are filtered out after parsing.
 const RelayMetadataSchema = z.object({
   relays: z.array(z.object({
-    url: z.string().url(),
+    url: z.string(),
     read: z.boolean(),
     write: z.boolean(),
   })),
@@ -35,6 +37,10 @@ const AppConfigSchema = z.object({
     heroTitle: z.string().optional(),
     heroSubtitle: z.string().optional(),
     heroBackground: z.string().optional(),
+    heroBackgroundType: z.enum(['none', 'image', 'color']).optional(),
+    heroBackgroundColor: z.string().optional(),
+    heroTextColor: z.string().optional(),
+    heroBanner: z.string().optional(),
     heroButtons: z.array(z.object({
       label: z.string(),
       href: z.string(),
@@ -42,19 +48,23 @@ const AppConfigSchema = z.object({
     })).optional(),
     showEvents: z.boolean().optional(),
     showBlog: z.boolean().optional(),
+    showFeed: z.boolean().optional(),
     maxEvents: z.number().optional(),
     maxBlogPosts: z.number().optional(),
+    maxFeedNotes: z.number().optional(),
     defaultRelay: z.string().optional(),
     publishRelays: z.array(z.string()).optional(),
     adminRoles: z.record(z.string(), z.enum(['primary', 'secondary'])).optional(),
     tweakcnThemeUrl: z.string().optional(),
     sectionOrder: z.array(z.string()).optional(),
+    homepageSectionOrder: z.array(z.string()).optional(),
     feedNpubs: z.array(z.string()).optional(),
     feedReadFromPublishRelays: z.boolean().optional(),
     blossomRelays: z.array(z.string()).optional(),
     excludedBlossomRelays: z.array(z.string()).optional(),
     updatedAt: z.number().optional(),
     readOnlyAdminAccess: z.boolean().optional(),
+    autoHarvest24h: z.boolean().optional(),
   }).optional(),
   navigation: z.array(z.object({
     id: z.string(),
@@ -87,7 +97,23 @@ export function AppProvider(props: AppProviderProps) {
           parsed.navigation = (parsed.navigation as Record<string, unknown>).navigation;
         }
 
-        return AppConfigSchema.partial().parse(parsed);
+        const config = AppConfigSchema.partial().parse(parsed);
+
+        // Filter out relays with empty or invalid URLs (must be ws: or wss:)
+        if (config.relayMetadata?.relays) {
+          config.relayMetadata = {
+            ...config.relayMetadata,
+            relays: config.relayMetadata.relays.filter(r => {
+              try {
+                if (!r.url) return false;
+                const parsed = new URL(r.url);
+                return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+              } catch { return false; }
+            }),
+          };
+        }
+
+        return config;
       }
     }
   );

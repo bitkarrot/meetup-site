@@ -2,7 +2,7 @@ import { type NostrEvent, type NostrMetadata, NSchema as n } from '@nostrify/nos
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
-import { queryWithNip65Fanout, getNip65ReadRelays } from '@/lib/queryRelays';
+import { queryWithNip65Fanout, getNip65ReadRelays, FALLBACK_DISCOVERY_RELAYS } from '@/lib/queryRelays';
 
 export function useAuthor(pubkey: string | undefined) {
   const { nostr } = useNostr();
@@ -16,12 +16,19 @@ export function useAuthor(pubkey: string | undefined) {
         return {};
       }
 
-      // Try primary relays + NIP-65 relays (profiles are social data across many relays)
+      // Try primary relays + NIP-65 relays + fallback discovery relays.
+      // Profiles are social data that may live on any relay — the author's
+      // kind 0 might not be on the current user's read relays, so we include
+      // well-known high-availability relays (damus, nos.lol, primal) to
+      // broaden coverage.
+      const authorRelays = new Set<string>(nip65ReadRelays);
+      FALLBACK_DISCOVERY_RELAYS.forEach((url) => authorRelays.add(url));
+
       let [event] = await queryWithNip65Fanout(
         nostr,
         [{ kinds: [0], authors: [pubkey!], limit: 1 }],
-        nip65ReadRelays,
-        AbortSignal.any([signal, AbortSignal.timeout(1500)]),
+        [...authorRelays],
+        AbortSignal.any([signal, AbortSignal.timeout(3000)]),
       );
 
       // If no event found, try purplepag.es
@@ -55,6 +62,6 @@ export function useAuthor(pubkey: string | undefined) {
       }
     },
     staleTime: 5 * 60 * 1000, // Keep cached data fresh for 5 minutes
-    retry: 3,
+    retry: 1, // One retry for transient errors; metadata either exists or doesn't
   });
 }

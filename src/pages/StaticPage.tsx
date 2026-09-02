@@ -11,6 +11,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useEffect, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { RefreshCw } from 'lucide-react';
+import DOMPurify from 'dompurify';
 
 export default function StaticPage({ pathOverride }: { pathOverride?: string }) {
   const { config: appContext } = useAppContext();
@@ -159,7 +160,15 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
         </div>
         <article className="prose prose-slate dark:prose-invert max-w-none">
           {isHtml ? (
-            <div dangerouslySetInnerHTML={{ __html: content || '' }} />
+            <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content || '', {
+              USE_PROFILES: { html: true },
+              ADD_TAGS: ['iframe', 'style', 'svg'],
+              ADD_ATTR: [
+                'target', 'allow', 'allowfullscreen', 'frameborder',
+                'scrolling', 'width', 'height', 'referrerpolicy',
+                'loading', 'sandbox',
+              ],
+            }) }} />
           ) : (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {content || ''}

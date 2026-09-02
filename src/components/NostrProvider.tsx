@@ -63,7 +63,7 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
 
         return [...allRelays];
       },
-      eoseTimeout: 1200,
+      eoseTimeout: 10000,
     } as unknown as ConstructorParameters<typeof NPool>[0];
 
     pool.current = new NPool(poolOptions);

@@ -17,7 +17,7 @@ import { genUserName } from '@/lib/genUserName';
 import { WalletModal } from '@/components/WalletModal';
 
 export function AccountSwitcher() {
-  const { currentUser } = useLoggedInAccounts();
+  const { currentUser, otherUsers, setLogin } = useLoggedInAccounts();
   const { logout } = useLoginActions();
 
   if (!currentUser) return null;
@@ -58,9 +58,28 @@ export function AccountSwitcher() {
               <span>Wallet Settings</span>
             </DropdownMenuItem>
           </WalletModal>
-          
+
+          {otherUsers.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              {otherUsers.map((account) => (
+                <DropdownMenuItem
+                  key={account.id}
+                  onClick={() => setLogin(account.id)}
+                  className='flex items-center gap-2 cursor-pointer p-2 rounded-md'
+                >
+                  <Avatar className='w-5 h-5'>
+                    <AvatarImage src={account.metadata.picture} alt={getDisplayName(account)} />
+                    <AvatarFallback className='text-[10px]'>{getDisplayName(account).charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <span className='truncate'>{getDisplayName(account)}</span>
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
+
           <DropdownMenuSeparator />
-          
+
           <DropdownMenuItem
             onClick={() => logout()}
             className='flex items-center gap-2 cursor-pointer p-2 rounded-md text-red-500'

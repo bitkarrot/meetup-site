@@ -2,6 +2,22 @@ import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import { isBlockedRelay } from '@/lib/blockedRelays';
 
 /**
+ * Well-known, high-availability relays used as fallback when looking up an
+ * author's NIP-65 relay list (kind 10002) or fetching events whose relay
+ * hints are missing or non-functional (e.g. search-only relays like nos.today
+ * that reject standard REQ queries).
+ *
+ * Used by `NostrEventEmbed` and `EventPickerDialog` to broaden relay
+ * coverage so events can be discovered even when the naddr/nevent relay hint
+ * is useless.
+ */
+export const FALLBACK_DISCOVERY_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+];
+
+/**
  * Query the default relay pool and fan out to additional NIP-65 relays,
  * merging and deduplicating results by event ID.
  *
@@ -18,6 +34,10 @@ export async function queryWithNip65Fanout(
   nip65RelayUrls: string[],
   signal: AbortSignal,
 ): Promise<NostrEvent[]> {
+  // Start all queries in parallel. The default relay (nostr.query) is
+  // the primary source — external NIP-65 relays supplement with additional
+  // data. We wait for all to settle, but the signal timeout ensures slow
+  // relays don't block the response for too long.
   const results = await Promise.allSettled([
     nostr.query(filters, { signal }),
     ...nip65RelayUrls.map((url: string) => {
