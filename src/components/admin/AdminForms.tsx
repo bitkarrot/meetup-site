@@ -60,6 +60,7 @@ import {
   Eye,
   Share2,
   Copy,
+  CopyPlus,
   ExternalLink,
   GripVertical,
   FileText,
@@ -178,6 +179,7 @@ function FormCard({
   user,
   isAdmin,
   onEdit,
+  onDuplicate,
   onDelete,
   onShare,
   onLinkPage,
@@ -188,6 +190,7 @@ function FormCard({
   user: { pubkey: string } | null;
   isAdmin: boolean;
   onEdit: (form: NostrForm) => void;
+  onDuplicate: (form: NostrForm) => void;
   onDelete: (form: NostrForm) => void;
   onShare: (form: NostrForm) => void;
   onLinkPage: (form: NostrForm) => void;
@@ -203,16 +206,16 @@ function FormCard({
     <Card className="hover:bg-muted/30 transition-colors">
       <CardContent className="pt-6">
         <div className="flex items-start justify-between">
-          <div className="space-y-2 flex-1">
-            <div className="flex items-center gap-2">
-              <ClipboardList className="h-4 w-4 text-primary" />
+          <div className="space-y-2 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <ClipboardList className="h-4 w-4 text-primary shrink-0" />
               <HoverCard openDelay={200}>
                 <HoverCardTrigger asChild>
-                  <h3 className="text-lg font-semibold cursor-help hover:text-primary transition-colors">
+                  <h3 className="text-lg font-semibold cursor-help hover:text-primary transition-colors break-words">
                     {form.name}
                   </h3>
                 </HoverCardTrigger>
-                <HoverCardContent className="w-[400px] max-h-[400px] overflow-auto p-4">
+                <HoverCardContent className="w-[calc(100vw-2rem)] max-w-[400px] max-h-[400px] overflow-auto p-4">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between border-b pb-2">
                       <h4 className="font-semibold text-sm flex items-center gap-2">
@@ -249,9 +252,9 @@ function FormCard({
                   </div>
                 </HoverCardContent>
               </HoverCard>
-              <Badge variant="outline">Kind 30168</Badge>
+              <Badge variant="outline" className="shrink-0">Kind 30168</Badge>
               {form.linkedPath && (
-                <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
                   <LinkIcon className="h-3 w-3 mr-1" />
                   {form.linkedPath}
                 </Badge>
@@ -314,6 +317,16 @@ function FormCard({
           >
             <FileText className="h-4 w-4 text-primary" />
             <span>View Responses</span>
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDuplicate(form)}
+            className="flex items-center gap-2"
+          >
+            <CopyPlus className="h-4 w-4" />
+            <span>Duplicate</span>
           </Button>
 
           {isAdmin && (
@@ -904,7 +917,11 @@ export default function AdminForms() {
           pubkey: event.pubkey,
           name: formData.name || 'Untitled Form',
           description: formData.description,
-          fields: formData.fields || [],
+          fields: (formData.fields || []).map((f: FormField) => ({
+            ...f,
+            // Guard against empty/unknown type values that crash <SelectItem value="">
+            type: (f.type && FIELD_TYPES.some(t => t.value === f.type)) ? f.type : 'shortText',
+          })),
           settings: formData.settings || {},
           created_at: event.created_at,
           relays: relayTags,
@@ -1251,6 +1268,23 @@ export default function AdminForms() {
   const _handleDelete = (form: NostrForm) => {
     setSelectedForm(form);
     setDeleteDialogOpen(true);
+  };
+
+  // Duplicate form — loads a copy into the builder as a new form
+  const handleDuplicate = (form: NostrForm) => {
+    setFormName(`${form.name} (Copy)`);
+    setFormDescription(form.description || '');
+    setFormFields(form.fields.map((field) => ({
+      ...field,
+      id: generateId(),
+    })));
+    setFormSettings({
+      encrypted: !!form.settings?.encrypted,
+    });
+    setEditingForm(null);
+    setEditingFormResponseCount(0);
+    setIsCreating(true);
+    window.scrollTo(0, 0);
   };
 
   const confirmDelete = () => {
@@ -1631,7 +1665,7 @@ export default function AdminForms() {
       ) : (
         <>
           {/* List View */}
-          <div className="flex items-center justify-between">
+          <div className="space-y-3">
             <div>
               <h2 className="text-2xl font-bold tracking-tight">Forms</h2>
               <p className="text-muted-foreground">
@@ -1640,22 +1674,8 @@ export default function AdminForms() {
               <p className="text-xs text-muted-foreground mt-1">
                 Forms can be shared via link or embedded on static pages
               </p>
-              <div className="flex items-center gap-2 mt-3">
-                <Switch
-                  id="filter-nostr-json"
-                  checked={filterByNostrJson}
-                  onCheckedChange={setFilterByNostrJson}
-                />
-                <Label
-                  htmlFor="filter-nostr-json"
-                  className="text-sm cursor-pointer flex items-center gap-2"
-                >
-                  <Filter className="h-3 w-3" />
-                  Show only users from nostr.json
-                </Label>
-              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                 Refresh
@@ -1664,6 +1684,20 @@ export default function AdminForms() {
                 <Plus className="h-4 w-4 mr-2" />
                 New Form
               </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="filter-nostr-json"
+                checked={filterByNostrJson}
+                onCheckedChange={setFilterByNostrJson}
+              />
+              <Label
+                htmlFor="filter-nostr-json"
+                className="text-sm cursor-pointer flex items-center gap-2"
+              >
+                <Filter className="h-3 w-3" />
+                Show only users from nostr.json
+              </Label>
             </div>
           </div>
 
@@ -1684,6 +1718,7 @@ export default function AdminForms() {
                   setIsCreating(true);
                   window.scrollTo(0, 0);
                 }}
+                onDuplicate={handleDuplicate}
                 onDelete={(form) => {
                   setSelectedForm(form);
                   setDeleteDialogOpen(true);

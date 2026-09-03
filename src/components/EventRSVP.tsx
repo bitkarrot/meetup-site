@@ -8,7 +8,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQuery } from '@tanstack/react-query';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useAuthor } from '@/hooks/useAuthor';
-import { Users, UserCheck, UserX, Clock, MapPin } from 'lucide-react';
+import { Users, UserCheck, UserX, Clock, MapPin, Video } from 'lucide-react';
 
 interface EventRSVPProps {
   event: {
@@ -20,6 +20,11 @@ interface EventRSVPProps {
     end?: number;
     location?: string;
     kind: number;
+    type?: 'calendar' | 'live';
+    room?: {
+      name: string;
+      serviceUrl: string;
+    };
   };
 }
 
@@ -131,6 +136,19 @@ export default function EventRSVP({ event }: EventRSVPProps) {
                   <div className="flex items-center gap-2">
                     <MapPin className="h-4 w-4" />
                     {event.location}
+                  </div>
+                )}
+                {event.type === 'live' && event.room?.serviceUrl && (
+                  <div className="flex items-center gap-2">
+                    <Video className="h-4 w-4" />
+                    <a
+                      href={event.room.serviceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline"
+                    >
+                      {event.room.name || 'Join Room'}
+                    </a>
                   </div>
                 )}
               </div>

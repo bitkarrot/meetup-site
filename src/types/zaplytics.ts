@@ -155,17 +155,18 @@ export interface AnalyticsData {
   hashtagPerformance: HashtagPerformance[];
 }
 
-export type TimeRange = '24h' | '7d' | 'custom';
+export type TimeRange = '24h' | '7d' | 'all' | 'custom';
 
 export interface TimeRangeConfig {
   label: string;
-  days: number | null; // null for 'custom'
+  days: number | null; // null for 'custom' and 'all'
   groupBy: 'hour' | 'day' | 'week' | 'month';
 }
 
 export const TIME_RANGES: Record<TimeRange, TimeRangeConfig> = {
   '24h': { label: 'Last 24 hours', days: 1, groupBy: 'hour' },
   '7d': { label: 'Last 7 days', days: 7, groupBy: 'day' },
+  'all': { label: 'All time', days: null, groupBy: 'month' },
   'custom': { label: 'Custom range', days: null, groupBy: 'day' },
 };
 

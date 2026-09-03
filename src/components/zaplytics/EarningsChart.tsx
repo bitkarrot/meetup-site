@@ -122,10 +122,12 @@ export function EarningsChart({ data, timeRange, customRange, isLoading }: Earni
             ) : (
               <AreaChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis 
-                  dataKey="period" 
+                <XAxis
+                  dataKey="period"
                   className="text-xs fill-muted-foreground"
                   tick={{ fontSize: 12 }}
+                  interval="preserveStartEnd"
+                  minTickGap={30}
                 />
                 <YAxis 
                   className="text-xs fill-muted-foreground"
@@ -184,6 +186,11 @@ function formatPeriodLabel(period: string, timeRange: TimeRange, customRange?: C
         return date.getHours().toString().padStart(2, '0') + ':00';
       case '7d':
         return (date.getMonth() + 1) + '/' + date.getDate();
+      case 'all':
+        return date.toLocaleDateString('en-US', {
+          month: 'short',
+          year: '2-digit'
+        });
       default:
         return period;
     }
@@ -212,6 +219,8 @@ function getGroupByLabel(timeRange: TimeRange, customRange?: CustomDateRange): s
       return 'hour';
     case '7d':
       return 'day';
+    case 'all':
+      return 'month';
     default:
       return 'period';
   }

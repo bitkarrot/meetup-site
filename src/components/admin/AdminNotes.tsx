@@ -2,12 +2,24 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { nip19 } from 'nostr-tools';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { withTimeout } from '@/lib/promiseTimeout';
 import { NoteContent } from '@/components/NoteContent';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -16,8 +28,8 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useToast } from '@/hooks/useToast';
 import { useQuery, useInfiniteQuery, type InfiniteData } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
-import { useNostr } from '@nostrify/react';
 import { BlossomUploader } from '@nostrify/nostrify/uploaders';
+import { stripImageMetadata } from '@/lib/mediaProcessing';
 import { queryWithNip65Fanout, getNip65ReadRelays } from '@/lib/queryRelays';
 import {
   Plus,
@@ -27,16 +39,27 @@ import {
   Heart,
   Zap,
   Repeat2,
+  Repeat,
   Share2,
+  Copy,
   Image as ImageIcon,
   Smile,
   Loader2,
   Library,
   Clock,
   RefreshCw,
+  MessageCircle,
+  Link2,
+  ChevronDown,
 } from 'lucide-react';
 import { MediaSelectorDialog } from './MediaSelectorDialog';
+import { EventPickerDialog } from './EventPickerDialog';
+import { MentionTextarea } from '@/components/MentionTextarea';
+import { extractPTags } from '@/lib/mentions';
+import { ExpandableSearch } from './ExpandableSearch';
 import { SchedulePicker } from './SchedulePicker';
+import { RepostDialog } from './RepostDialog';
+import { format } from 'date-fns';
 import { useCreateScheduledPost, useUpdateScheduledPost } from '@/hooks/useScheduledPosts';
 import { useSchedulerHealth } from '@/hooks/useSchedulerHealth';
 import type { ScheduleConfig } from '@/components/admin/SchedulePicker';
@@ -47,6 +70,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useBlossomRelays } from '@/hooks/useBlossomRelays';
+import {
+  useNoteStats,
+  EngagementPopover,
+  filterSelf,
+} from '@/components/EngagementStats';
 
 // --- Types ---
 
@@ -58,77 +87,43 @@ interface Note {
   tags: string[][];
   isDraft: boolean;
   dTag?: string;
+  sig: string;
 }
 
-interface NoteStats {
-  reactions: number;
-  zaps: number;
-  zapAmount: number;
-  reposts: number;
+/** Filter notes by a case-insensitive content search query. */
+function filterNotesByQuery(notes: Note[], query: string): Note[] {
+  if (!query.trim()) return notes;
+  const q = query.toLowerCase();
+  return notes.filter((note) => note.content.toLowerCase().includes(q));
+}
+
+/**
+ * Insert `text` at the textarea's current cursor position, replacing any
+ * selection. Falls back to appending if the textarea ref is null. Restores
+ * focus and places the caret after the inserted text.
+ */
+function insertAtCursor(
+  textarea: HTMLTextAreaElement | null,
+  text: string,
+  content: string,
+  setContent: (value: string) => void,
+) {
+  if (!textarea) {
+    setContent(content + text);
+    return;
+  }
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const newContent = content.slice(0, start) + text + content.slice(end);
+  setContent(newContent);
+  const pos = start + text.length;
+  setTimeout(() => {
+    textarea.focus();
+    textarea.setSelectionRange(pos, pos);
+  }, 0);
 }
 
 // --- Helper Components ---
-
-function useNoteStats(noteId: string, _notePubkey: string): NoteStats & { isLoading: boolean } {
-  const { nostr } = useNostr();
-  const { config } = useAppContext();
-  const nip65ReadRelays = getNip65ReadRelays(config.relayMetadata);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['note-stats', noteId],
-    queryFn: async () => {
-      const signal = AbortSignal.timeout(5000);
-
-      // Fetch reactions (kind 7), zaps (kind 9735), and reposts (kind 6)
-      // Fan out to NIP-65 relays since social engagement data lives across many relays
-      const [reactions, zaps, reposts] = await Promise.all([
-        queryWithNip65Fanout(nostr, [{ kinds: [7], '#e': [noteId] }], nip65ReadRelays, signal),
-        queryWithNip65Fanout(nostr, [{ kinds: [9735], '#e': [noteId] }], nip65ReadRelays, signal),
-        queryWithNip65Fanout(nostr, [{ kinds: [6], '#e': [noteId] }], nip65ReadRelays, signal),
-      ]);
-
-      // Calculate zap amount
-      let zapAmount = 0;
-      zaps.forEach(zap => {
-        // Try to extract amount from bolt11 or amount tag
-        const amountTag = zap.tags.find(([name]) => name === 'amount')?.[1];
-        if (amountTag) {
-          zapAmount += Math.floor(parseInt(amountTag) / 1000);
-        } else {
-          const descriptionTag = zap.tags.find(([name]) => name === 'description')?.[1];
-          if (descriptionTag) {
-            try {
-              const zapRequest = JSON.parse(descriptionTag);
-              const requestAmountTag = zapRequest.tags?.find(([name]: string[]) => name === 'amount')?.[1];
-              if (requestAmountTag) {
-                zapAmount += Math.floor(parseInt(requestAmountTag) / 1000);
-              }
-            } catch {
-              // ignore parse errors
-            }
-          }
-        }
-      });
-
-      return {
-        reactions: reactions.length,
-        zaps: zaps.length,
-        zapAmount,
-        reposts: reposts.length,
-      };
-    },
-    enabled: !!noteId,
-    staleTime: 60000,
-  });
-
-  return {
-    reactions: data?.reactions ?? 0,
-    zaps: data?.zaps ?? 0,
-    zapAmount: data?.zapAmount ?? 0,
-    reposts: data?.reposts ?? 0,
-    isLoading,
-  };
-}
 
 function NoteCard({
   note,
@@ -136,7 +131,9 @@ function NoteCard({
   gateway,
   onEdit,
   onDelete,
-  engagementFilters
+  engagementFilters,
+  relayUrl,
+  publishRelays,
 }: {
   note: Note;
   user: { pubkey: string } | undefined;
@@ -144,8 +141,21 @@ function NoteCard({
   onEdit: (note: Note) => void;
   onDelete: (note: Note) => void;
   engagementFilters?: { reactions: boolean, zaps: boolean, reposts: boolean, replies: boolean };
+  relayUrl: string;
+  publishRelays: string[];
 }) {
-  const stats = useNoteStats(note.id, note.pubkey);
+  const stats = useNoteStats(note.id);
+  const { toast } = useToast();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [repostOpen, setRepostOpen] = useState(false);
+
+  // Filter out the current user from engagement summaries
+  const myPubkey = user?.pubkey;
+  const reactionUsers = filterSelf(stats.reactionUsers, myPubkey);
+  const zapUsers = filterSelf(stats.zapUsers, myPubkey);
+  const repostUsers = filterSelf(stats.repostUsers, myPubkey);
+  const replyUsers = filterSelf(stats.replyUsers, myPubkey);
+
   const noteId = useMemo(() => {
     try {
       return nip19.noteEncode(note.id);
@@ -155,15 +165,16 @@ function NoteCard({
   }, [note.id]);
 
   if (engagementFilters && !stats.isLoading) {
-    const { reactions, zaps, reposts } = engagementFilters;
-    const isAnyFilterActive = reactions || zaps || reposts;
+    const { reactions, zaps, reposts, replies } = engagementFilters;
+    const isAnyFilterActive = reactions || zaps || reposts || replies;
 
     if (isAnyFilterActive) {
       const matchReactions = reactions && stats.reactions > 0;
       const matchZaps = zaps && stats.zaps > 0;
       const matchReposts = reposts && stats.reposts > 0;
+      const matchReplies = replies && stats.replies > 0;
 
-      if (!matchReactions && !matchZaps && !matchReposts) {
+      if (!matchReactions && !matchZaps && !matchReposts && !matchReplies) {
         return null;
       }
     }
@@ -172,63 +183,56 @@ function NoteCard({
   const cleanGateway = gateway.endsWith('/') ? gateway.slice(0, -1) : gateway;
   const noteUrl = `${cleanGateway}/${noteId}`;
 
+  const engagementBadges = [
+    { icon: Heart, count: stats.reactions, users: reactionUsers, title: 'Reactions',
+      active: 'bg-red-500/10 border-red-500/20', iconActive: 'text-red-500 fill-red-500', textActive: 'text-red-500', label: String(stats.reactions) },
+    { icon: Zap, count: stats.zaps, users: zapUsers, title: `${stats.zapAmount} sats`,
+      active: 'bg-yellow-500/10 border-yellow-500/20', iconActive: 'text-yellow-500 fill-yellow-500', textActive: 'text-yellow-500',
+      label: stats.zapAmount > 0 ? `${stats.zaps} · ${stats.zapAmount.toLocaleString()}` : String(stats.zaps) },
+    { icon: Repeat2, count: stats.reposts, users: repostUsers, title: 'Reposts',
+      active: 'bg-green-500/10 border-green-500/20', iconActive: 'text-green-500', textActive: 'text-green-500', label: String(stats.reposts) },
+    { icon: MessageCircle, count: stats.replies, users: replyUsers, title: 'Replies',
+      active: 'bg-blue-500/10 border-blue-500/20', iconActive: 'text-blue-500', textActive: 'text-blue-500', label: String(stats.replies) },
+  ];
+
   return (
+    <>
     <Card className="py-2">
       <CardContent className="py-2 px-4">
         {/* Top row: Badges on left, Engagement stats + Actions on right */}
         <div className="flex items-center justify-between gap-3 mb-2">
-          {/* Left: Status badges */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Badge variant={note.isDraft ? 'secondary' : 'default'} className="text-xs">
-              {note.isDraft ? 'Draft' : 'Published'}
-            </Badge>
-            <Badge variant="outline" className="text-[10px] font-mono">
-              Kind 1
-            </Badge>
-          </div>
+          {/* Left: spacer (badges removed — tab context is enough) */}
+          <div className="flex-shrink-0" />
 
           {/* Right: Large engagement stats + action buttons */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
             {/* Engagement stats - big and prominent for published notes */}
             {!note.isDraft && (
               <div className="flex items-center gap-2">
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all ${stats.reactions > 0
-                    ? 'bg-red-500/10 border-red-500/20 opacity-100'
-                    : 'bg-muted/10 border-transparent opacity-30 grayscale'
-                    }`}
-                  title="Reactions"
-                >
-                  <Heart className={`h-5 w-5 ${stats.reactions > 0 ? 'text-red-500 fill-red-500' : 'text-muted-foreground'}`} />
-                  <span className={`text-sm font-semibold ${stats.reactions > 0 ? 'text-red-500' : 'text-muted-foreground'}`}>{stats.reactions}</span>
-                </div>
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all ${stats.zaps > 0
-                    ? 'bg-yellow-500/10 border-yellow-500/20 opacity-100'
-                    : 'bg-muted/10 border-transparent opacity-30 grayscale'
-                    }`}
-                  title={`${stats.zapAmount} sats`}
-                >
-                  <Zap className={`h-5 w-5 ${stats.zaps > 0 ? 'text-yellow-500 fill-yellow-500' : 'text-muted-foreground'}`} />
-                  <span className={`text-sm font-semibold ${stats.zaps > 0 ? 'text-yellow-500' : 'text-muted-foreground'}`}>
-                    {stats.zaps}{stats.zapAmount > 0 ? ` · ${stats.zapAmount.toLocaleString()}` : ''}
-                  </span>
-                </div>
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all ${stats.reposts > 0
-                    ? 'bg-green-500/10 border-green-500/20 opacity-100'
-                    : 'bg-muted/10 border-transparent opacity-30 grayscale'
-                    }`}
-                  title="Reposts"
-                >
-                  <Repeat2 className={`h-5 w-5 ${stats.reposts > 0 ? 'text-green-500' : 'text-muted-foreground'}`} />
-                  <span className={`text-sm font-semibold ${stats.reposts > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>{stats.reposts}</span>
-                </div>
+                {engagementBadges.map(({ icon: Icon, count, users, title, active, iconActive, textActive, label }, i) => (
+                  <EngagementPopover key={i} users={users} count={users.length}>
+                    <div
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all ${count > 0
+                        ? `${active} opacity-100`
+                        : 'bg-muted/10 border-transparent opacity-30 grayscale'
+                        }`}
+                      title={title}
+                    >
+                      <Icon className={`h-5 w-5 ${count > 0 ? iconActive : 'text-muted-foreground'}`} />
+                      <span className={`text-sm font-semibold ${count > 0 ? textActive : 'text-muted-foreground'}`}>{label}</span>
+                    </div>
+                  </EngagementPopover>
+                ))}
               </div>
             )}
 
             {/* Action buttons */}
             <div className="flex gap-1 flex-shrink-0">
+              {!note.isDraft && (
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setRepostOpen(true)} title="Schedule repost">
+                  <Repeat className="h-4 w-4" />
+                </Button>
+              )}
               {user && note.pubkey === user.pubkey && (
                 <>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(note)} title="Edit">
@@ -249,19 +253,98 @@ function NoteCard({
             {note.content.slice(0, 150)}{note.content.length > 150 ? '...' : ''}
           </p>
           {!note.isDraft && (
-            <a
-              href={noteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-primary hover:underline flex-shrink-0"
+            <Button
+              variant="link"
+              size="sm"
+              className="flex items-center gap-1 text-xs h-auto p-0 flex-shrink-0"
+              onClick={() => setPreviewOpen(true)}
+              title="Preview note"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               View
-            </a>
+            </Button>
           )}
         </div>
       </CardContent>
     </Card>
+
+    {/* In-tab note preview popup */}
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">Note preview</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            {format(new Date(note.created_at * 1000), 'MMM d, yyyy · h:mm a')}
+          </p>
+          <DialogDescription className="sr-only">
+            Full content of note {noteId}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-y-auto pr-1 -mr-1">
+          <NoteContent
+            event={{
+              id: note.id,
+              pubkey: note.pubkey,
+              created_at: note.created_at,
+              kind: 1,
+              content: note.content,
+              tags: note.tags,
+              sig: '',
+            }}
+            className="text-base whitespace-pre-wrap break-words"
+          />
+          <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3">
+            <a
+              href={noteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open in new tab
+            </a>
+            <div className="flex items-center gap-1.5 min-w-0 ml-auto">
+              <span className="text-xs text-muted-foreground font-mono truncate">
+                {noteId}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0"
+                title="Copy nostr:note ID"
+                onClick={() => {
+                  navigator.clipboard.writeText(`nostr:${noteId}`);
+                  toast({ title: 'Copied', description: 'nostr:note ID copied to clipboard.' });
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Repost dialog */}
+    {repostOpen && (
+      <RepostDialog
+        open={repostOpen}
+        onOpenChange={setRepostOpen}
+        target={{
+          id: note.id,
+          pubkey: note.pubkey,
+          kind: 1,
+          content: note.content,
+          tags: note.tags,
+          created_at: note.created_at,
+          sig: note.sig,
+        }}
+        relayUrl={relayUrl}
+        publishRelays={publishRelays}
+        previewTitle={note.content.slice(0, 80).replace(/[*#>`]/g, '')}
+      />
+    )}
+    </>
   );
 }
 
@@ -270,13 +353,15 @@ function NoteCard({
 
 export default function AdminNotes() {
   const location = useLocation();
-  const { nostr, publishRelays: initialPublishRelays } = useDefaultRelay();
+  const { nostr, defaultRelayUrl, publishRelays: initialPublishRelays } = useDefaultRelay();
   const { user } = useCurrentUser();
   const { mutateAsync: publishEvent, isPending } = useNostrPublish();
   const { config } = useAppContext();
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'drafts' | 'published'>('published');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [editingScheduledPostId, setEditingScheduledPostId] = useState<string | null>(null);
@@ -294,6 +379,13 @@ export default function AdminNotes() {
     replies: false
   });
   const [showMediaSelector, setShowMediaSelector] = useState(false);
+  const [showEventPicker, setShowEventPicker] = useState(false);
+  // Track which action is in progress so only the clicked button shows loading.
+  // 'draft' = Save Draft, 'publish' = Publish/Schedule, null = idle.
+  const [pendingAction, setPendingAction] = useState<'draft' | 'publish' | null>(null);
+  // NIP-10 p-tags for mentions in the composer, derived from content so they
+  // stay correct whether content changes by typing, clearing, or loading a draft.
+  const mentionTags = useMemo(() => extractPTags(content), [content]);
   const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>({
     enabled: false,
     scheduledFor: null,
@@ -306,32 +398,9 @@ export default function AdminNotes() {
 
   const gateway = config.siteConfig?.nip19Gateway || 'https://nostr.at';
 
-  // Derive blossom relays including the default relay (same logic as AdminMedia)
-  const blossomRelays = useMemo(() => {
-    const storedRelays = config.siteConfig?.blossomRelays || [];
-    const excludedRelays = config.siteConfig?.excludedBlossomRelays || [];
-    const relays = [...storedRelays];
-    const defaultRelay = config.siteConfig?.defaultRelay;
+  const blossomRelays = useBlossomRelays();
 
-    if (defaultRelay) {
-      let normalizedDefault = defaultRelay.replace(/\/$/, '');
-      if (normalizedDefault.startsWith('wss://')) {
-        normalizedDefault = normalizedDefault.replace('wss://', 'https://');
-      } else if (normalizedDefault.startsWith('ws://')) {
-        normalizedDefault = normalizedDefault.replace('ws://', 'http://');
-      }
-
-      const isExcluded = excludedRelays.includes(normalizedDefault);
-
-      if ((normalizedDefault.startsWith('http://') || normalizedDefault.startsWith('https://')) && !relays.includes(normalizedDefault) && !isExcluded) {
-        relays.unshift(normalizedDefault);
-      }
-    }
-
-    return relays;
-  }, [config.siteConfig?.blossomRelays, config.siteConfig?.defaultRelay, config.siteConfig?.excludedBlossomRelays]);
-
-  const { ref: loadMoreRef, inView } = useInView();
+  const { ref: loadMoreRef, inView } = useInView({ rootMargin: '200px' });
 
   // Fetch published notes (Kind 1) from the logged-in user with infinite scroll
   const {
@@ -345,11 +414,11 @@ export default function AdminNotes() {
     initialPageParam: undefined,
     queryFn: async ({ pageParam }) => {
       const until = pageParam;
-      if (!user?.pubkey) return [];
+      if (!user?.pubkey || !nostr) return [];
       const signal = AbortSignal.timeout(5000);
       // Fan out to NIP-65 relays since user's notes may live on multiple relays
       const nip65Relays = getNip65ReadRelays(config.relayMetadata);
-      const events = await queryWithNip65Fanout(nostr!, [
+      const events = await queryWithNip65Fanout(nostr, [
         {
           kinds: [1],
           authors: [user.pubkey],
@@ -365,18 +434,24 @@ export default function AdminNotes() {
         pubkey: event.pubkey,
         tags: event.tags,
         isDraft: false,
+        sig: event.sig,
       })).sort((a, b) => b.created_at - a.created_at);
     },
     getNextPageParam: (lastPage) => {
-      if (lastPage.length < 50) return undefined;
-      return lastPage[lastPage.length - 1].created_at - 1;
+      // Keep fetching while the last page returned events. Relying on the page
+      // length being exactly 50 is unreliable because NIP-65 fanout can dedupe
+      // results across relays and return fewer events even when more exist.
+      const lastNote = lastPage[lastPage.length - 1];
+      if (!lastNote) return undefined;
+      return lastNote.created_at - 1;
     },
     enabled: !!nostr && !!user?.pubkey,
   });
 
-  const publishedNotes = useMemo(() => {
-    return publishedNotesData?.pages.flat() || [];
-  }, [publishedNotesData]);
+  const publishedNotes = useMemo(
+    () => filterNotesByQuery(publishedNotesData?.pages.flat() || [], searchQuery),
+    [publishedNotesData, searchQuery],
+  );
 
   // Load more when scrolled to bottom
   useEffect(() => {
@@ -389,9 +464,9 @@ export default function AdminNotes() {
   const { data: draftNotes, refetch: refetchDrafts } = useQuery({
     queryKey: ['admin-notes-drafts', user?.pubkey],
     queryFn: async () => {
-      if (!user?.pubkey) return [];
+      if (!user?.pubkey || !nostr) return [];
       const signal = AbortSignal.timeout(5000);
-      const events = (await nostr!.query([
+      const events = (await nostr.query([
         { kinds: [31234], authors: [user.pubkey], '#k': ['1'], limit: 50 }
       ], { signal })).filter(e => e.tags.some(([t, v]) => t === 'k' && v === '1'));
 
@@ -428,6 +503,7 @@ export default function AdminNotes() {
           tags: event.tags,
           isDraft: true,
           dTag,
+          sig: event.sig,
         };
       }));
 
@@ -435,6 +511,11 @@ export default function AdminNotes() {
     },
     enabled: !!nostr && !!user?.pubkey,
   });
+
+  const filteredDraftNotes = useMemo(
+    () => filterNotesByQuery(draftNotes || [], searchQuery),
+    [draftNotes, searchQuery],
+  );
 
   const refetchAll = useCallback(async () => {
     await Promise.all([refetchPublished(), refetchDrafts()]);
@@ -495,16 +576,21 @@ export default function AdminNotes() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isCreating, isDirty]);
 
-  const handleCancel = () => {
-    if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) {
-      return;
-    }
+  const resetEditor = useCallback(() => {
     setIsCreating(false);
     setEditingNote(null);
     setEditingScheduledPostId(null);
     setContent('');
     setEditorTab('edit');
     setScheduleConfig({ enabled: false, scheduledFor: null });
+    setPendingAction(null);
+  }, []);
+
+  const handleCancel = () => {
+    if (isDirty && !confirm('You have unsaved changes. Are you sure you want to discard them?')) {
+      return;
+    }
+    resetEditor();
   };
 
   const handleFileUpload = async (files: File[]) => {
@@ -526,12 +612,22 @@ export default function AdminNotes() {
       const urls: string[] = [];
 
       for (const file of files) {
+        // Strip metadata from images before upload
+        const { file: strippedFile, stripped, reason } = await stripImageMetadata(file);
+        if (!stripped && reason === 'gif') {
+          toast({
+            title: 'Metadata not stripped',
+            description: `${file.name}: GIF files cannot be metadata-stripped. EXIF/GPS data may be visible.`,
+            variant: 'destructive',
+          });
+        }
+
         const uploader = new BlossomUploader({
           servers: [defaultBlossomRelay],
           signer: user.signer,
         });
 
-        const result = await uploader.upload(file);
+        const result = await uploader.upload(strippedFile);
         if (result && result.length > 0) {
           const urlTag = result.find((tag: string[]) => tag[0] === 'url');
           if (urlTag && urlTag[1]) {
@@ -604,6 +700,9 @@ export default function AdminNotes() {
   const handleSubmit = async (asDraft: boolean) => {
     if (!user || !content.trim()) return;
 
+    setPendingAction(asDraft ? 'draft' : 'publish');
+    const relaysToUse = selectedRelays.length > 0 ? selectedRelays : initialPublishRelays;
+
     // If scheduling is enabled and not saving as draft
     if (scheduleConfig.enabled && scheduleConfig.scheduledFor && !asDraft) {
       try {
@@ -612,14 +711,23 @@ export default function AdminNotes() {
         const created_at = Math.floor(scheduledFor.getTime() / 1000);
 
         // Create and sign the event with future timestamp
-        const signedEvent = await user.signer.signEvent({
-          kind: 1,
-          content: content,
-          tags: [],
-          created_at,
-        }) as NostrEvent;
+        const signedEvent = await withTimeout(
+          user.signer.signEvent({
+            kind: 1,
+            content: content,
+            tags: mentionTags,
+            created_at,
+          }) as Promise<NostrEvent>,
+          60_000,
+          'Signing timed out. Check that your signer is unlocked and authorized.',
+        );
 
-        const relaysToUse = selectedRelays.length > 0 ? selectedRelays : initialPublishRelays;
+        if (signedEvent.pubkey !== user.pubkey) {
+          throw new Error(
+            'The signer returned a different public key than the logged-in user. ' +
+            `Make sure your extension/bunker is switched to ${user.pubkey}, not ${signedEvent.pubkey}.`,
+          );
+        }
 
         // Update existing scheduled post or create new one
         if (editingScheduledPostId) {
@@ -653,14 +761,11 @@ export default function AdminNotes() {
           });
         }
 
-        setContent('');
-        setIsCreating(false);
-        setEditingNote(null);
-        setEditingScheduledPostId(null);
-        setScheduleConfig({ enabled: false, scheduledFor: null });
+        resetEditor();
         return;
       } catch (error) {
         console.error('Failed to schedule note:', error);
+        setPendingAction(null);
         toast({
           title: 'Error',
           description: (error as Error).message || 'Failed to schedule note.',
@@ -676,15 +781,23 @@ export default function AdminNotes() {
         const draftEvent = {
           kind: 1,
           content: content,
-          tags: [],
+          tags: mentionTags,
           created_at: Math.floor(Date.now() / 1000),
         };
 
         let encryptedContent: string;
         if (user.signer.nip44) {
-          encryptedContent = await user.signer.nip44.encrypt(user.pubkey, JSON.stringify(draftEvent));
+          encryptedContent = await withTimeout(
+            user.signer.nip44.encrypt(user.pubkey, JSON.stringify(draftEvent)),
+            60_000,
+            'Encryption timed out. Check that your signer is unlocked and authorized.',
+          );
         } else if (user.signer.nip04) {
-          encryptedContent = await user.signer.nip04.encrypt(user.pubkey, JSON.stringify(draftEvent));
+          encryptedContent = await withTimeout(
+            user.signer.nip04.encrypt(user.pubkey, JSON.stringify(draftEvent)),
+            60_000,
+            'Encryption timed out. Check that your signer is unlocked and authorized.',
+          );
         } else {
           encryptedContent = JSON.stringify(draftEvent);
         }
@@ -700,7 +813,7 @@ export default function AdminNotes() {
               ['k', '1'],
             ],
           },
-          relays: selectedRelays,
+          relays: relaysToUse,
         });
 
         toast({ title: 'Draft Saved', description: 'Your note draft has been saved privately.' });
@@ -709,9 +822,9 @@ export default function AdminNotes() {
           event: {
             kind: 1,
             content: content,
-            tags: [],
+            tags: mentionTags,
           },
-          relays: selectedRelays,
+          relays: relaysToUse,
         });
 
         if (editingNote?.isDraft && editingNote.dTag) {
@@ -723,20 +836,21 @@ export default function AdminNotes() {
                 ['a', `31234:${user.pubkey}:${editingNote.dTag}`]
               ],
             },
-            relays: selectedRelays,
+            relays: relaysToUse,
           });
         }
 
         toast({ title: 'Note Published', description: 'Your note has been published to the network!' });
       }
 
-      setContent('');
-      setIsCreating(false);
-      setEditingNote(null);
-      setScheduleConfig({ enabled: false, scheduledFor: null });
-      refetchAll();
+      resetEditor();
+      // Delay refetch so the relay has time to index the just-published event.
+      // Without this, drafts/notes don't appear on first save (especially when
+      // the NIP-07 extension adds latency for first-time kind authorization).
+      setTimeout(() => refetchAll(), 500);
     } catch (error) {
       console.error('Failed to save/publish note:', error);
+      setPendingAction(null);
       toast({
         title: 'Error',
         description: (error as Error).message || 'Failed to save note.',
@@ -765,7 +879,7 @@ export default function AdminNotes() {
       });
 
       toast({ title: 'Deleted', description: 'Note deleted successfully.' });
-      refetchAll();
+      setTimeout(() => refetchAll(), 500);
     } catch (error) {
       toast({
         title: 'Error',
@@ -777,13 +891,12 @@ export default function AdminNotes() {
 
   const handleEdit = (note: Note) => {
     setEditingNote(note);
+    setEditingScheduledPostId(null);
     setContent(note.content);
     setIsCreating(true);
     setScheduleConfig({ enabled: false, scheduledFor: null });
     window.scrollTo(0, 0);
   };
-
-
 
   return (
     <div className="space-y-6">
@@ -807,23 +920,24 @@ export default function AdminNotes() {
                 </TabsList>
 
                 <TabsContent value="edit" className="mt-2">
-                  <Textarea
+                  <MentionTextarea
                     ref={textareaRef}
                     value={content}
-                    onChange={(e) => setContent(e.target.value)}
+                    onChange={setContent}
                     onPaste={handlePaste}
                     onDrop={handleDrop}
-                    placeholder="Write something... (Paste or drop media files to upload)"
+                    placeholder="Write something... (Paste or drop media files to upload, type @ to mention)"
                     className="min-h-[200px] resize-none"
                     required
                   />
                 </TabsContent>
 
                 <TabsContent value="preview" className="mt-2">
-                  <div className="min-h-[200px] p-4 border rounded-md max-w-none bg-muted/30 overflow-auto">
+                  <div className="min-h-[200px] p-4 border rounded-md max-w-none bg-muted/30">
                     {content ? (
                       <NoteContent
                         event={{ content, kind: 1, tags: [], created_at: 0, id: '', pubkey: '', sig: '' }}
+                        truncateEmbeds={false}
                       />
                     ) : (
                       <span className="text-muted-foreground italic">Nothing to preview</span>
@@ -841,45 +955,47 @@ export default function AdminNotes() {
                 />
               )}
 
-              {/* Relay Selection */}
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center gap-2 text-sm font-medium">
+              {/* Publishing Relays — collapsed under Advanced */}
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors pt-2">
                   <Share2 className="h-4 w-4" />
-                  Post to
-                  <Badge variant="outline" className="text-xs">Optimal relays</Badge>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto">
-                  {initialPublishRelays.map((relay) => (
-                    <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
-                      <Checkbox
-                        id={`relay-${relay}`}
-                        checked={selectedRelays.includes(relay)}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedRelays(prev => [...prev, relay]);
-                          } else {
-                            setSelectedRelays(prev => prev.filter(r => r !== relay));
-                          }
-                        }}
-                      />
-                      <label
-                        htmlFor={`relay-${relay}`}
-                        className="text-xs font-mono truncate cursor-pointer flex-1"
-                        title={relay}
-                      >
-                        {relay.replace('wss://', '').replace('ws://', '')}
-                      </label>
-                    </div>
-                  ))}
-                  {initialPublishRelays.length === 0 && (
-                    <p className="text-xs text-muted-foreground italic">No publishing relays configured.</p>
-                  )}
-                </div>
-              </div>
+                  Advanced: Publishing Relays
+                  <ChevronDown className="h-4 w-4" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-3">
+                  <div className="grid gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto">
+                    {initialPublishRelays.map((relay) => (
+                      <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
+                        <Checkbox
+                          id={`relay-${relay}`}
+                          checked={selectedRelays.includes(relay)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedRelays(prev => [...prev, relay]);
+                            } else {
+                              setSelectedRelays(prev => prev.filter(r => r !== relay));
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`relay-${relay}`}
+                          className="text-xs font-mono truncate cursor-pointer flex-1"
+                          title={relay}
+                        >
+                          {relay.replace('wss://', '').replace('ws://', '')}
+                        </label>
+                      </div>
+                    ))}
+                    {initialPublishRelays.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic">No publishing relays configured.</p>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
 
               {/* Footer Actions */}
-              <div className="flex items-center justify-between border-t pt-4">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -921,6 +1037,22 @@ export default function AdminNotes() {
                     </Tooltip>
                   </TooltipProvider>
 
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() => setShowEventPicker(true)}
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Insert Event</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
                   <div className="relative">
                     <TooltipProvider>
                       <Tooltip>
@@ -950,19 +1082,7 @@ export default function AdminNotes() {
                                 type="button"
                                 className="p-1 hover:bg-muted rounded text-lg transition-colors"
                                 onClick={() => {
-                                  const textarea = textareaRef.current;
-                                  if (textarea) {
-                                    const start = textarea.selectionStart;
-                                    const end = textarea.selectionEnd;
-                                    const newContent = content.slice(0, start) + emoji + content.slice(end);
-                                    setContent(newContent);
-                                    setTimeout(() => {
-                                      textarea.focus();
-                                      textarea.setSelectionRange(start + emoji.length, start + emoji.length);
-                                    }, 0);
-                                  } else {
-                                    setContent(prev => prev + emoji);
-                                  }
+                                  insertAtCursor(textareaRef.current, emoji, content, setContent);
                                   setShowEmojiPicker(false);
                                 }}
                               >
@@ -978,20 +1098,16 @@ export default function AdminNotes() {
                     open={showMediaSelector}
                     onOpenChange={setShowMediaSelector}
                     onSelect={(url) => {
-                      const textarea = textareaRef.current;
-                      if (textarea) {
-                        const start = textarea.selectionStart;
-                        const end = textarea.selectionEnd;
-                        const newContent = content.slice(0, start) + '\n' + url + '\n' + content.slice(end);
-                        setContent(newContent);
-                        setTimeout(() => {
-                          textarea.focus();
-                          textarea.setSelectionRange(start + url.length + 2, start + url.length + 2);
-                        }, 0);
-                      } else {
-                        setContent(prev => prev + '\n' + url + '\n');
-                      }
+                      insertAtCursor(textareaRef.current, `\n${url}\n`, content, setContent);
                       setShowMediaSelector(false);
+                    }}
+                  />
+
+                  <EventPickerDialog
+                    open={showEventPicker}
+                    onOpenChange={setShowEventPicker}
+                    onSelect={(nostrRef) => {
+                      insertAtCursor(textareaRef.current, `\n${nostrRef}\n`, content, setContent);
                     }}
                   />
                 </div>
@@ -1003,15 +1119,16 @@ export default function AdminNotes() {
                   <Button
                     variant="secondary"
                     onClick={() => handleSubmit(true)}
-                    disabled={isPending || isScheduling || !content.trim()}
+                    disabled={!!pendingAction || !content.trim()}
+                    className={pendingAction === 'draft' ? 'btn-loading-snake' : ''}
                   >
                     Save Draft
                   </Button>
                   <Button
                     onClick={() => handleSubmit(false)}
-                    disabled={isPending || isScheduling || !content.trim()}
+                    disabled={!!pendingAction || !content.trim()}
+                    className={pendingAction === 'publish' ? 'btn-loading-snake' : ''}
                   >
-                    {isPending || isScheduling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                     {scheduleConfig.enabled ? (
                       <>
                         <Clock className="h-4 w-4 mr-2" />
@@ -1032,48 +1149,57 @@ export default function AdminNotes() {
         </>
       ) : (
         <>
-          <div className="flex items-center justify-between">
+          <div className="space-y-3">
             <div>
               <h2 className="text-2xl font-bold tracking-tight">Notes</h2>
               <p className="text-muted-foreground">
                 Create and manage your short-form notes (Kind 1).
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-              <Button onClick={() => { setEditingNote(null); setContent(''); setScheduleConfig({ enabled: false, scheduledFor: null }); setIsCreating(true); }}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Note
-              </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <ExpandableSearch
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Search notes by content..."
+                open={searchOpen}
+                onOpenChange={setSearchOpen}
+              />
+              <div className="flex gap-2 ml-auto">
+                <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button onClick={() => { resetEditor(); setIsCreating(true); }}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Note
+                </Button>
+              </div>
             </div>
           </div>
 
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'drafts' | 'published')}>
-            <div className="flex items-center justify-between">
-              <TabsList className="grid w-fit grid-cols-2">
-                <TabsTrigger value="drafts">
-                  Drafts
-                  {draftNotes && draftNotes.length > 0 && (
-                    <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
-                      {draftNotes.length}
-                    </Badge>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="published">
-                  Published
-                  {publishedNotes && publishedNotes.length > 0 && (
-                    <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
-                      {publishedNotes.length}
-                    </Badge>
-                  )}
-                </TabsTrigger>
-              </TabsList>
+            <TabsList className="grid w-full grid-cols-2 sm:w-fit">
+              <TabsTrigger value="drafts">
+                Drafts
+                {draftNotes && draftNotes.length > 0 && (
+                  <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
+                    {draftNotes.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="published">
+                Published
+                {publishedNotes && publishedNotes.length > 0 && (
+                  <Badge variant="secondary" className="ml-2 h-5 min-w-5 px-1 text-xs">
+                    {publishedNotes.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            </TabsList>
 
-              {activeTab === 'published' && (
-                <div className="flex items-center gap-1.5 bg-muted/30 p-1 rounded-lg border">
+            {activeTab === 'published' && (
+              <div className="flex items-center gap-2 mt-3">
+                <div className="flex items-center gap-1.5 bg-muted/30 p-1 rounded-lg border ml-auto">
                   <Button
                     variant={engagementFilters.reactions ? 'default' : 'ghost'}
                     size="sm"
@@ -1083,30 +1209,39 @@ export default function AdminNotes() {
                   >
                     <Heart className={cn("h-4 w-4", engagementFilters.reactions && "fill-current")} />
                   </Button>
-                  <Button
-                    variant={engagementFilters.zaps ? 'default' : 'ghost'}
-                    size="sm"
-                    className="h-8 w-10 px-0"
-                    onClick={() => setEngagementFilters(prev => ({ ...prev, zaps: !prev.zaps }))}
-                    title="Filter by Zaps"
-                  >
-                    <Zap className={cn("h-4 w-4", engagementFilters.zaps && "fill-current")} />
-                  </Button>
-                  <Button
-                    variant={engagementFilters.reposts ? 'default' : 'ghost'}
-                    size="sm"
-                    className="h-8 w-10 px-0"
-                    onClick={() => setEngagementFilters(prev => ({ ...prev, reposts: !prev.reposts }))}
-                    title="Filter by Reposts"
-                  >
-                    <Repeat2 className="h-4 w-4" />
-                  </Button>
+                <Button
+                  variant={engagementFilters.zaps ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-8 w-10 px-0"
+                  onClick={() => setEngagementFilters(prev => ({ ...prev, zaps: !prev.zaps }))}
+                  title="Filter by Zaps"
+                >
+                  <Zap className={cn("h-4 w-4", engagementFilters.zaps && "fill-current")} />
+                </Button>
+                <Button
+                  variant={engagementFilters.reposts ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-8 w-10 px-0"
+                  onClick={() => setEngagementFilters(prev => ({ ...prev, reposts: !prev.reposts }))}
+                  title="Filter by Reposts"
+                >
+                  <Repeat2 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={engagementFilters.replies ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-8 w-10 px-0"
+                  onClick={() => setEngagementFilters(prev => ({ ...prev, replies: !prev.replies }))}
+                  title="Filter by Replies"
+                >
+                  <MessageCircle className={cn("h-4 w-4", engagementFilters.replies && "fill-current")} />
+                </Button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             <TabsContent value="drafts" className="mt-4 space-y-4">
-              {draftNotes?.map((note) => (
+              {filteredDraftNotes.map((note) => (
                 <NoteCard
                   key={note.id}
                   note={note}
@@ -1114,12 +1249,16 @@ export default function AdminNotes() {
                   gateway={gateway}
                   onEdit={handleEdit}
                   onDelete={handleDelete}
+                  relayUrl={defaultRelayUrl || ''}
+                  publishRelays={initialPublishRelays}
                 />
               ))}
-              {(!draftNotes || draftNotes.length === 0) && (
+              {filteredDraftNotes.length === 0 && (
                 <Card>
                   <CardContent className="pt-6 text-center">
-                    <p className="text-muted-foreground">No draft notes. Create a new note!</p>
+                    <p className="text-muted-foreground">
+                      {searchQuery ? 'No drafts match your search.' : 'No draft notes. Create a new note!'}
+                    </p>
                   </CardContent>
                 </Card>
               )}
@@ -1135,6 +1274,8 @@ export default function AdminNotes() {
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                   engagementFilters={engagementFilters}
+                  relayUrl={defaultRelayUrl || ''}
+                  publishRelays={initialPublishRelays}
                 />
               ))}
 
@@ -1162,7 +1303,9 @@ export default function AdminNotes() {
               {(!publishedNotes || publishedNotes.length === 0) && (
                 <Card>
                   <CardContent className="pt-6 text-center">
-                    <p className="text-muted-foreground">No published notes yet.</p>
+                    <p className="text-muted-foreground">
+                      {searchQuery ? 'No published notes match your search.' : 'No published notes yet.'}
+                    </p>
                   </CardContent>
                 </Card>
               )}

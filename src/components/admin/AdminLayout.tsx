@@ -8,24 +8,20 @@ import { LoginArea } from '@/components/auth/LoginArea';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useAdminAuth } from '@/hooks/useRemoteNostrJson';
-import { isUnifiedSetup } from '@/lib/relay';
 import { useSchedulerHealth } from '@/hooks/useSchedulerHealth';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useQueryClient } from '@tanstack/react-query';
-import type { NostrFilter } from '@nostrify/nostrify';
 import {
   LayoutDashboard,
   FileText,
   FileCode,
   Calendar,
-  Settings,
   Home,
   Menu,
   X,
   Sun,
   Moon,
   Shield,
-  Rss,
   Zap,
   FileImage,
   MessageCircle,
@@ -33,7 +29,8 @@ import {
   Clock,
   ClipboardList,
   RefreshCw,
-  UserRoundCog,
+  Database,
+  Users,
 } from 'lucide-react';
 
 export default function AdminLayout() {
@@ -47,7 +44,7 @@ export default function AdminLayout() {
   const { theme, setTheme } = useTheme();
   const { user } = useCurrentUser();
   const { config } = useAppContext();
-  const { isAdmin, isMaster: isMasterUser } = useAdminAuth(user?.pubkey);
+  const { isAdmin, isMaster: isMasterUser, isLoading: authLoading } = useAdminAuth(user?.pubkey);
   const { data: isSchedulerHealthy } = useSchedulerHealth();
   const { nostr } = useDefaultRelay();
   const queryClient = useQueryClient();
@@ -61,22 +58,15 @@ export default function AdminLayout() {
     queryClient.prefetchQuery({
       queryKey: ['admin-blog-posts', user?.pubkey],
       queryFn: async () => {
-        const filters: NostrFilter[] = [{ kinds: [30023], limit: 50 }];
-        if (user?.pubkey) {
-          filters.push({ kinds: [31234], authors: [user.pubkey], '#k': ['30023'], limit: 20 });
-        }
-        const events = await nostr.query(filters, { signal });
-        return events.filter(event =>
-          event.kind === 30023 ||
-          (event.kind === 31234 && event.tags.some(([name, value]) => name === 'k' && value === '30023'))
-        );
+        const events = await nostr.query([{ kinds: [30023], limit: 50 }], { signal });
+        return events.sort((a, b) => b.created_at - a.created_at);
       },
     });
 
     queryClient.prefetchQuery({
       queryKey: ['admin-events'],
       queryFn: async () => {
-        return nostr.query([{ kinds: [31922, 31923], limit: 100 }], { signal });
+        return nostr.query([{ kinds: [31922, 31923, 30313], limit: 50 }], { signal });
       },
     });
   }, [nostr, user?.pubkey, queryClient]);
@@ -89,27 +79,29 @@ export default function AdminLayout() {
 
   const readOnlyEnabled = config.siteConfig?.readOnlyAdminAccess ?? false;
   const canAccessSettings = isMasterUser || (isAdmin && readOnlyEnabled);
-  const canManageRelayAccess = isUnifiedSetup() && isMasterUser;
+
+  // Relay Explorer is restricted to the relay owner (the "_" entry in
+  // nostr.json). We intentionally do NOT check adminRoles here because
+  // adminRoles is a CMS-level concept stored in a 30078 event that can
+  // get out of sync with the relay's actual access control (nostr.json).
+  // The owner is always identified by isMasterUser, which compares the
+  // logged-in pubkey against nostr.json's "_" entry.
+  const canAccessExplorer = !authLoading && isMasterUser;
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
     { name: 'Notes', href: '/admin/notes', icon: MessageCircle },
     { name: 'Blog Posts', href: '/admin/blog', icon: FileText },
     ...(isSchedulerHealthy ? [{ name: 'Scheduled', href: '/admin/scheduled', icon: Clock }] : []),
-
-    { name: 'Events', href: '/admin/events', icon: Calendar },
-    { name: 'Feed', href: '/admin/feed', icon: Rss },
-    { name: 'Zaplytics', href: '/admin/zaplytics', icon: Zap },
     { name: 'Media', href: '/admin/media', icon: FileImage },
-    { name: 'Pages', href: '/admin/pages', icon: FileCode },
+    { name: 'Zaplytics', href: '/admin/zaplytics', icon: Zap },
+    { name: 'Events', href: '/admin/events', icon: Calendar },
     { name: 'Forms', href: '/admin/forms', icon: ClipboardList },
+    { name: 'Pages', href: '/admin/pages', icon: FileCode },
+    ...(canAccessExplorer ? [{ name: 'Relay Explorer', href: '/admin/explorer', icon: Database }] : []),
     { name: 'Sync Content', href: '/admin/sync-content', icon: RefreshCw },
-    ...(canManageRelayAccess ? [{ name: 'Manage Relay Access', href: '/admin/relay-access', icon: UserRoundCog }] : []),
-    ...(canAccessSettings ? [
-      { name: 'Site Settings', href: '/admin/settings', icon: Settings },
-      { name: 'Admin Settings', href: '/admin/system-settings', icon: Shield }
-    ] : []),
-    { name: 'View Site', href: '/', icon: Home },
+    { name: 'Follow Backup', href: '/admin/follow-backup', icon: Users },
+    ...(canAccessSettings ? [{ name: 'Admin Settings', href: '/admin/system-settings', icon: Shield }] : []),
     { name: 'Help', href: '/admin/help', icon: HelpCircle },
   ];
 
@@ -216,11 +208,7 @@ export default function AdminLayout() {
           </Button>
           <Separator orientation="vertical" className="h-6" />
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
-            <div className="flex flex-1 items-center">
-              <h1 className="text-lg font-semibold">
-                {navigation.find(item => item.href === location.pathname)?.name || 'Admin'}
-              </h1>
-            </div>
+            <div className="flex flex-1 items-center" />
             <div className="flex items-center gap-x-2 lg:gap-x-4">
               <Button
                 variant="ghost"
@@ -232,19 +220,6 @@ export default function AdminLayout() {
                   <Home className="h-5 w-5" />
                 </Link>
               </Button>
-
-              {canAccessSettings && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  asChild
-                  title="Site Settings"
-                >
-                  <Link to="/admin/settings">
-                    <Settings className="h-5 w-5" />
-                  </Link>
-                </Button>
-              )}
 
               <Separator orientation="vertical" className="h-6 mx-1" />
 

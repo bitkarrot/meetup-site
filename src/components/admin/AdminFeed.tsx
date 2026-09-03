@@ -101,7 +101,7 @@ export default function AdminFeed() {
   const adminRoles = config.siteConfig?.adminRoles || {};
   const userRole = userPubkey ? adminRoles[userPubkey] : undefined;
 
-  const canManageFeed = isMaster || userRole === 'primary';
+  const canManageFeed = isMaster || userRole === 'publisher';
 
   const handleSave = async () => {
     if (!canManageFeed) return;
@@ -172,17 +172,19 @@ export default function AdminFeed() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="space-y-3">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Feed Management</h2>
           <p className="text-muted-foreground">
             Configure which Nostr users appear in your community feed.
           </p>
         </div>
-        <Button onClick={handleSave} disabled={isSaving || !user || !canManageFeed}>
-          <Save className="h-4 w-4 mr-2" />
-          {isSaving ? 'Saving...' : 'Save Changes'}
-        </Button>
+        <div className="flex justify-end">
+          <Button onClick={handleSave} disabled={isSaving || !user || !canManageFeed}>
+            <Save className="h-4 w-4 mr-2" />
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </div>
       </div>
 
       {!canManageFeed && (
@@ -225,7 +227,7 @@ export default function AdminFeed() {
                   </SelectTrigger>
                   <SelectContent>
                     {remoteNostrJson?.names && Object.entries(remoteNostrJson.names)
-                      .filter(([_, pubkey]) => !feedNpubs.includes(pubkey as string))
+                      .filter(([_, pubkey]) => !!(pubkey as string) && !feedNpubs.includes(pubkey as string))
                       .map(([name, pubkey]) => (
                         <SelectItem key={pubkey as string} value={pubkey as string}>
                           <DirectorySelectItem name={name} pubkey={pubkey as string} />
@@ -249,7 +251,7 @@ export default function AdminFeed() {
               <CardDescription>
                 Add a specific Nostr public key (npub) to the feed sources.
               </CardDescription>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Input
                   id="manualNpub"
                   value={newNpub}
@@ -282,7 +284,7 @@ export default function AdminFeed() {
                     No feed sources added yet.
                   </div>
                 ) : (
-                  feedNpubs.map((npub) => (
+                  feedNpubs.filter(npub => !!npub).map((npub) => (
                     <FeedSourceItem
                       key={npub}
                       npub={npub}

@@ -1,5 +1,4 @@
 import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Zap, Clock, Database, Download, Play, Pause, RotateCcw } from 'lucide-react';
@@ -126,8 +125,8 @@ export function ZapLoadingProgress({
               {/* Current status */}
               <div className="flex justify-between items-center text-sm">
                 <span className="text-muted-foreground">
-                  {isLoading ? (autoLoadEnabled ? 'Auto-loading more zaps...' : 'Loading more zaps...') : 
-                   canLoadMore ? 'Ready to load more data' : 'Fetching complete'}
+                  {isLoading ? (autoLoadEnabled ? 'Auto-loading more zaps...' : 'Loading more zaps...') :
+                   autoLoadEnabled ? 'Preparing next batch...' : 'Ready to load more data'}
                 </span>
                 
                 <div className="flex items-center gap-2">
@@ -180,14 +179,23 @@ export function ZapLoadingProgress({
                 </div>
               </div>
 
-              {/* Loading indicator */}
-              {isLoading && (
+              {/* Loading indicator — show whenever loading is in progress,
+                  not just during active fetch. This prevents the animation
+                  from flickering off between batches (200ms gap). */}
+              {autoLoadEnabled && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                    Loading zap data in batches for optimal performance...
+                    <div className={`w-2 h-2 bg-primary rounded-full ${isLoading ? 'animate-pulse' : 'animate-pulse opacity-50'}`}></div>
+                    {isLoading
+                      ? 'Loading zap data in batches for optimal performance...'
+                      : 'Preparing next batch...'}
                   </div>
-                  <Progress value={undefined} className="h-2" /> {/* Indeterminate progress */}
+                  {/* Indeterminate loading bar — shadcn Progress doesn't
+                      support indeterminate mode (value=undefined renders
+                      the indicator off-screen), so we use a CSS animation. */}
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                    <div className="h-full w-1/3 rounded-full bg-primary animate-[loading_1.5s_ease-in-out_infinite]" />
+                  </div>
                 </div>
               )}
             </div>

@@ -12,61 +12,59 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { getMasterPubkey } from '@/lib/relay';
-import { parseCalendarEventStartEnd } from '@/lib/eventTime';
+import { normalizeEvent, type UnifiedCalendarEvent } from '@/lib/calendarEvents';
+import { fetchRoomDetails } from '@/hooks/useRooms';
 import { useAppContext } from '@/hooks/useAppContext';
-import { ArrowLeft, Calendar, MapPin, Clock, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Calendar, MapPin, Clock, RefreshCw, Video } from 'lucide-react';
 import { AuthorInfo } from '@/components/AuthorInfo';
+
+type EventDetail = UnifiedCalendarEvent & {
+  author: string;
+  d: string;
+  description: string;
+};
 
 export default function EventPage() {
   const { eventId } = useParams<{ eventId: string }>();
-  const { nostr } = useDefaultRelay();
+  const { nostr, poolNostr } = useDefaultRelay();
   const { config } = useAppContext();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const { data: event, isLoading, refetch } = useQuery({
     queryKey: ['event', eventId, config.siteConfig?.adminRoles],
-    queryFn: async () => {
-      if (!eventId) return null;
-      
+    queryFn: async (): Promise<EventDetail | null> => {
+      if (!eventId || !poolNostr) return null;
+
       const signal = AbortSignal.timeout(5000);
       const events = await nostr!.query([
         { ids: [eventId], limit: 1 }
       ], { signal });
-      
+
       if (events.length === 0) return null;
-      
+
       const e = events[0];
 
       const adminRoles = config.siteConfig?.adminRoles || {};
       const masterPubkey = getMasterPubkey();
-      
+
       const authorPubkey = e.pubkey.toLowerCase().trim();
-      if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'primary') return null;
-      
+      if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'publisher') return null;
+
       const tags = e.tags || [];
-      const startTag = tags.find(([name]) => name === 'start')?.[1] || '0';
-      const endTag = tags.find(([name]) => name === 'end')?.[1];
-      const { start, end } = parseCalendarEventStartEnd(
-        e.kind,
-        startTag,
-        endTag,
-        e.created_at,
-      );
+      const dTag = tags.find(([name]) => name === 'd')?.[1] || e.id;
+
+      const fetchRoom = (coords: string) => fetchRoomDetails(coords, poolNostr as Parameters<typeof fetchRoomDetails>[1]);
+      const normalizedEvent = await normalizeEvent(e, fetchRoom);
+
+      const status = normalizedEvent.status || (tags.find(([name]) => name === 'status')?.[1] || 'confirmed');
 
       return {
-        id: e.id,
+        ...normalizedEvent,
         author: e.pubkey,
-        d: tags.find(([name]) => name === 'd')?.[1] || e.id,
-        title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
-        summary: tags.find(([name]) => name === 'summary')?.[1] || '',
+        d: dTag,
         description: e.content,
-        location: tags.find(([name]) => name === 'location')?.[1] || '',
-        start,
-        end,
-        status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
-        image: tags.find(([name]) => name === 'image')?.[1] || '',
-        kind: e.kind,
-      };
+        status,
+      } as EventDetail;
     },
     enabled: !!nostr && !!eventId,
   });
@@ -120,7 +118,9 @@ export default function EventPage() {
     );
   }
 
-  const isPast = event.end ? event.end * 1000 < Date.now() : event.start * 1000 < Date.now();
+  const isPast = event.type === 'live'
+    ? (event.end ? event.end * 1000 < Date.now() : event.status === 'ended')
+    : (event.end ? event.end * 1000 < Date.now() : event.start * 1000 < Date.now());
 
   return (
     <div className="min-h-screen">
@@ -166,7 +166,7 @@ export default function EventPage() {
                   <span>- {new Date(event.end * 1000).toLocaleDateString()}</span>
                 )}
               </div>
-              {event.kind === 31923 && (
+              {(event.kind === 31923 || event.type === 'live') && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Clock className="h-4 w-4" />
                   <span>{new Date(event.start * 1000).toLocaleTimeString()}</span>
@@ -175,10 +175,26 @@ export default function EventPage() {
                   )}
                 </div>
               )}
-              {event.location && (
+              {event.type === 'calendar' && event.location && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <MapPin className="h-4 w-4" />
                   <span>{event.location}</span>
+                </div>
+              )}
+              {event.type === 'live' && event.room && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Video className="h-4 w-4" />
+                  <span>{event.room.name}</span>
+                  {event.room.serviceUrl && (
+                    <a
+                      href={event.room.serviceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline text-xs"
+                    >
+                      (Join Room)
+                    </a>
+                  )}
                 </div>
               )}
             </div>

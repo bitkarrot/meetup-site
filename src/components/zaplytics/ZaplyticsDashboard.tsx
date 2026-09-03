@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Zap, TrendingUp, Users, BarChart3 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Zap, TrendingUp, Users, BarChart3, Loader2 } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useZapAnalytics } from '@/hooks/useZapAnalytics';
 import { LoginArea } from '@/components/auth/LoginArea';
@@ -15,7 +16,6 @@ import { ZapperLoyalty } from '@/components/zaplytics/ZapperLoyalty';
 import { ContentPerformance } from '@/components/zaplytics/ContentPerformance';
 import { HashtagAnalytics } from '@/components/zaplytics/HashtagAnalytics';
 import { CsvExport } from '@/components/zaplytics/CsvExport';
-import { ZapLoadingProgress } from '@/components/zaplytics/ZapLoadingProgress';
 import type { TimeRange, CustomDateRange, AnalyticsData } from '@/types/zaplytics';
 
 export function ZaplyticsDashboard() {
@@ -27,16 +27,17 @@ export function ZaplyticsDashboard() {
   // Check if custom range is selected but incomplete
   const isCustomRangeIncomplete = timeRange === 'custom' && (!customRange?.from || !customRange?.to);
   
-  const { 
-    data: analytics, 
-    isLoading, 
-    error 
+  const {
+    data: analytics,
+    isLoading,
+    error,
+    loadingState
   } = useZapAnalytics(timeRange, customRange) as {
-    data?: AnalyticsData & { 
+    data?: AnalyticsData & {
       loadingState: {
-        isLoading: boolean; 
-        isComplete: boolean; 
-        totalFetched: number; 
+        isLoading: boolean;
+        isComplete: boolean;
+        totalFetched: number;
         relayLimit: number | null;
         canLoadMore: boolean;
         loadMoreZaps: () => void;
@@ -48,7 +49,24 @@ export function ZaplyticsDashboard() {
     };
     isLoading: boolean;
     error: Error | null;
+    loadingState: {
+      isLoading: boolean;
+      isComplete: boolean;
+      totalFetched: number;
+      relayLimit: number | null;
+      canLoadMore: boolean;
+      loadMoreZaps: () => void;
+      autoLoadEnabled: boolean;
+      consecutiveFailures: number;
+      toggleAutoLoad: () => void;
+      restartAutoLoad: () => void;
+    };
   };
+
+  // Only show skeletons on the very first load (no data yet).
+  // During progressive batch loading, show the data we have so far
+  // to avoid the screen glitching between skeletons and content.
+  const showSkeletons = isLoading && !analytics;
 
   // User not logged in
   if (!user) {
@@ -180,27 +198,56 @@ export function ZaplyticsDashboard() {
           </Alert>
         )}
 
-        {/* Loading Progress */}
-        {analytics?.loadingState && !isCustomRangeIncomplete && (
-          <ZapLoadingProgress
-            isLoading={analytics.loadingState.isLoading}
-            isComplete={analytics.loadingState.isComplete}
-            currentCount={analytics.loadingState.totalFetched}
-            relayLimit={analytics.loadingState.relayLimit}
-            canLoadMore={analytics.loadingState.canLoadMore}
-            onLoadMore={analytics.loadingState.loadMoreZaps}
-            autoLoadEnabled={analytics.loadingState.autoLoadEnabled}
-            consecutiveFailures={analytics.loadingState.consecutiveFailures}
-            onToggleAutoLoad={analytics.loadingState.toggleAutoLoad}
-            onRestartAutoLoad={analytics.loadingState.restartAutoLoad}
-            phase="receipts"
-          />
+        {/* Loading indicator — prominent bar between time range and stats.
+            Shows whenever progressive loading is in progress (not complete).
+            Uses loadingState directly from progressiveData for instant updates. */}
+        {loadingState && !isCustomRangeIncomplete && !loadingState.isComplete && loadingState.totalFetched >= 0 && (
+          <div className="mb-6 flex items-center gap-3 rounded-lg border-2 border-primary/30 bg-primary/5 p-4">
+            <Loader2 className="h-6 w-6 animate-spin text-primary flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-primary">
+                  {loadingState.isLoading
+                    ? 'Loading zap data...'
+                    : loadingState.autoLoadEnabled
+                      ? 'Preparing next batch...'
+                      : 'Ready to load more'}
+                </span>
+                <span className="text-sm font-medium text-primary/70 tabular-nums">
+                  {loadingState.totalFetched.toLocaleString()} zaps loaded
+                </span>
+              </div>
+              {/* Indeterminate loading bar — CSS class for reliable animation */}
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-primary/10">
+                <div className="h-full w-1/3 rounded-full bg-primary animate-loading" />
+              </div>
+            </div>
+            {loadingState.canLoadMore && !loadingState.isLoading && (
+              <Button
+                onClick={loadingState.loadMoreZaps}
+                size="sm"
+                variant="outline"
+                className="flex-shrink-0"
+              >
+                Load More
+              </Button>
+            )}
+          </div>
         )}
 
         {!isCustomRangeIncomplete && (
           <div className="space-y-8">
+            {/* Fallback loading indicator inside stats area — visible even if
+                the one above doesn't render. Shows a simple spinner + text. */}
+            {loadingState && !loadingState.isComplete && (
+              <div className="flex items-center gap-2 text-sm text-primary">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading zaps... {loadingState.totalFetched.toLocaleString()} loaded</span>
+              </div>
+            )}
+
             {/* Stats Cards */}
-            <StatsCards data={analytics} isLoading={isLoading} />
+            <StatsCards data={analytics} isLoading={showSkeletons} />
 
             {/* Charts Row */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -209,13 +256,13 @@ export function ZaplyticsDashboard() {
                 data={analytics?.earningsByPeriod || []} 
                 timeRange={timeRange}
                 customRange={customRange}
-                isLoading={isLoading} 
+                isLoading={showSkeletons} 
               />
 
               {/* Top Content */}
               <TopContentTable 
                 data={analytics?.topContent || []}
-                isLoading={isLoading}
+                isLoading={showSkeletons}
               />
             </div>
 
@@ -226,7 +273,7 @@ export function ZaplyticsDashboard() {
                 <TemporalPatternsChart 
                   hourlyData={analytics.temporalPatterns.earningsByHour}
                   weeklyData={analytics.temporalPatterns.earningsByDayOfWeek}
-                  isLoading={isLoading}
+                  isLoading={showSkeletons}
                 />
               )}
 
@@ -234,7 +281,7 @@ export function ZaplyticsDashboard() {
               {analytics?.earningsByKind && analytics.earningsByKind.length > 0 && (
                 <EarningsByKindChart 
                   data={analytics.earningsByKind}
-                  isLoading={isLoading}
+                  isLoading={showSkeletons}
                 />
               )}
             </div>
@@ -243,7 +290,7 @@ export function ZaplyticsDashboard() {
             {analytics?.zapperLoyalty && (
               <ZapperLoyalty 
                 data={analytics.zapperLoyalty}
-                isLoading={isLoading}
+                isLoading={showSkeletons}
               />
             )}
 
@@ -251,7 +298,7 @@ export function ZaplyticsDashboard() {
             {analytics?.contentPerformance && analytics.contentPerformance.length > 0 && (
               <ContentPerformance 
                 data={analytics.contentPerformance}
-                isLoading={isLoading}
+                isLoading={showSkeletons}
               />
             )}
 
@@ -259,7 +306,7 @@ export function ZaplyticsDashboard() {
             {analytics?.hashtagPerformance && (
               <HashtagAnalytics 
                 data={analytics.hashtagPerformance}
-                isLoading={isLoading}
+                isLoading={showSkeletons}
               />
             )}
 
@@ -268,11 +315,11 @@ export function ZaplyticsDashboard() {
               data={analytics}
               timeRange={timeRange}
               customRange={customRange}
-              isLoading={isLoading}
+              isLoading={showSkeletons}
             />
 
             {/* Empty state when no data */}
-            {!isLoading && analytics && analytics.totalZaps === 0 && (
+            {!showSkeletons && analytics && analytics.totalZaps === 0 && (
               <Card className="border-dashed">
                 <CardContent className="py-16 px-8 text-center">
                   <div className="max-w-md mx-auto space-y-6">

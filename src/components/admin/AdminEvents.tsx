@@ -12,41 +12,35 @@ import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useAuthor } from '@/hooks/useAuthor';
 import { parseCalendarEventStartEnd } from '@/lib/eventTime';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Edit, Trash2, Calendar, MapPin, Share2, Eye, Layout, Search, ExternalLink, Library, Filter, RefreshCw } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, MapPin, Share2, ExternalLink, Library, Filter, RefreshCw, Repeat, Clock, MessageSquare, List, LayoutGrid } from 'lucide-react';
 import { MediaSelectorDialog } from './MediaSelectorDialog';
+import { ExpandableSearch } from './ExpandableSearch';
+import { RepostDialog } from './RepostDialog';
+import { ShareAsNoteDialog } from './ShareAsNoteDialog';
+import { CreateEventDialog } from './CreateEventDialog';
 import { AuthorInfo } from '@/components/AuthorInfo';
-import { useQuery } from '@tanstack/react-query';
-import { useRemoteNostrJson } from '@/hooks/useRemoteNostrJson';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Switch } from '@/components/ui/switch';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
 import { Link } from 'react-router-dom';
+import { CalendarGrid } from './CalendarGrid';
+import { CalendarErrorBoundary } from '@/components/CalendarErrorBoundary';
+import type { UnifiedCalendarEvent, RoomDetails } from '@/lib/calendarEvents';
+import { parseRoomEvent } from '@/lib/roomEvents';
 
-interface MeetupEvent {
-  id: string;
-  title: string;
-  summary: string;
-  description: string;
-  location: string;
-  start: number;
-  end?: number;
-  kind: 31922 | 31923; // date-based or time-based
-  status: string;
-  d: string;
-  image?: string;
-  pubkey: string;
-}
+type AdminEvent = UnifiedCalendarEvent & { d: string; roomServiceUrl?: string; status: string; location?: string; room?: RoomDetails };
 
-function EventCard({ event, user, usernameSearch, onEdit, onDelete }: {
-  event: MeetupEvent;
+function EventCard({ event, user, usernameSearch, onEdit, onDelete, relayUrl, publishRelays }: {
+  event: AdminEvent;
   user: NUser | undefined;
   usernameSearch: string;
-  onEdit: (event: MeetupEvent) => void;
-  onDelete: (event: MeetupEvent) => void;
+  onEdit: (event: AdminEvent) => void;
+  onDelete: (event: AdminEvent) => void;
+  relayUrl: string;
+  publishRelays: string[];
 }) {
   const { data: author } = useAuthor(event.pubkey);
+  const [repostOpen, setRepostOpen] = useState(false);
+  const [shareNoteOpen, setShareNoteOpen] = useState(false);
 
   // Filter by username search
   if (usernameSearch.trim()) {
@@ -62,18 +56,18 @@ function EventCard({ event, user, usernameSearch, onEdit, onDelete }: {
     <Card>
       <CardContent className="pt-6">
         <div className="flex items-start justify-between">
-          <div className="space-y-2 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-semibold">{event.title}</h3>
-              <Badge variant="outline" className="text-[10px] font-mono">Kind {event.kind}</Badge>
-              <Badge variant={isEventPast ? 'secondary' : 'default'}>
+          <div className="space-y-2 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-semibold break-words">{event.title}</h3>
+              <Badge variant="outline" className="text-[10px] font-mono shrink-0">Kind {event.kind}</Badge>
+              <Badge variant={isEventPast ? 'secondary' : 'default'} className="shrink-0">
                 {isEventPast ? 'Past' : 'Upcoming'}
               </Badge>
-              <Badge variant="outline">{event.status}</Badge>
+              <Badge variant="outline" className="shrink-0">{event.status}</Badge>
             </div>
 
             {event.summary && (
-              <p className="text-sm text-muted-foreground">{event.summary}</p>
+              <p className="text-sm text-muted-foreground break-words">{event.summary}</p>
             )}
 
             <AuthorInfo pubkey={event.pubkey} className="flex items-center gap-2 my-2" />
@@ -82,7 +76,7 @@ function EventCard({ event, user, usernameSearch, onEdit, onDelete }: {
               <div className="flex items-center gap-1">
                 <Calendar className="h-3 w-3" />
                 {new Date(event.start * 1000).toLocaleDateString()}
-                {event.kind === 31923 && (
+                {(event.kind === 31923 || event.kind === 30313) && (
                   <span>{new Date(event.start * 1000).toLocaleTimeString()}</span>
                 )}
               </div>
@@ -92,20 +86,28 @@ function EventCard({ event, user, usernameSearch, onEdit, onDelete }: {
                   {event.location}
                 </div>
               )}
+              {event.roomServiceUrl && (
+                <div className="flex items-center gap-1">
+                  <Library className="h-3 w-3" />
+                  <a href={event.roomServiceUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    Room
+                  </a>
+                </div>
+              )}
             </div>
-
-            {event.description && (
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                {event.description.replace(/<[^>]*>/g, '').slice(0, 200)}...
-              </p>
-            )}
           </div>
 
-          <div className="flex gap-2 ml-4">
+          <div className="flex gap-2 ml-4 flex-wrap shrink-0">
             <Button variant="ghost" size="sm" asChild>
               <Link to={`/event/${event.id}`} title="View public event">
                 <ExternalLink className="h-4 w-4" />
               </Link>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setRepostOpen(true)} title="Schedule repost">
+              <Repeat className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShareNoteOpen(true)} title="Share as note">
+              <MessageSquare className="h-4 w-4" />
             </Button>
             {user && event.pubkey === user.pubkey && (
               <>
@@ -120,26 +122,75 @@ function EventCard({ event, user, usernameSearch, onEdit, onDelete }: {
           </div>
         </div>
       </CardContent>
+
+      {/* Repost dialog */}
+      {repostOpen && (
+        <RepostDialog
+          open={repostOpen}
+          onOpenChange={setRepostOpen}
+          target={{
+            id: event.id,
+            pubkey: event.pubkey,
+            kind: event.kind,
+            content: event.description || event.summary,
+            tags: [
+              ['title', event.title],
+              ['d', event.d],
+              ...(event.image ? [['image', event.image] as [string, string]] : []),
+              ...(event.location ? [['location', event.location] as [string, string]] : []),
+              ...(event.status ? [['status', event.status] as [string, string]] : []),
+            ],
+            created_at: event.start,
+            d: event.d,
+            sig: event.sig || '',
+          }}
+          relayUrl={relayUrl}
+          publishRelays={publishRelays}
+          thumbnailUrl={event.image}
+          previewTitle={event.title}
+        />
+      )}
+
+      {/* Share as note dialog */}
+      {shareNoteOpen && (
+        <ShareAsNoteDialog
+          open={shareNoteOpen}
+          onOpenChange={setShareNoteOpen}
+          target={{
+            id: event.id,
+            pubkey: event.pubkey,
+            kind: event.kind,
+            title: event.title,
+            summary: event.summary,
+            d: event.d,
+            room: event.room,
+          }}
+          relayUrl={relayUrl}
+          publishRelays={publishRelays}
+        />
+      )}
     </Card>
   );
 }
 
 export default function AdminEvents() {
-  const { nostr, publishRelays: initialPublishRelays } = useDefaultRelay();
+  const { nostr, defaultRelayUrl, publishRelays: initialPublishRelays } = useDefaultRelay();
   const { user } = useCurrentUser();
-  const { mutate: publishEvent } = useNostrPublish();
+  const queryClient = useQueryClient();
+  const publishEvent = useNostrPublish();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<MeetupEvent | null>(null);
+  const [editingEvent, setEditingEvent] = useState<AdminEvent | null>(null);
   const [eventType, setEventType] = useState<'date' | 'time'>('time');
   const [selectedRelays, setSelectedRelays] = useState<string[]>([]);
   const [usernameSearch, setUsernameSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [filterByNostrJson, setFilterByNostrJson] = useState(false);
-  const { data: remoteNostrJson } = useRemoteNostrJson();
+  const [timeFilter, setTimeFilter] = useState<'all' | 'upcoming' | 'past'>('all');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [formData, setFormData] = useState({
     title: '',
     summary: '',
-    description: '',
     location: '',
     startDate: '',
     startTime: '',
@@ -149,6 +200,7 @@ export default function AdminEvents() {
     status: 'confirmed',
   });
   const [showMediaSelector, setShowMediaSelector] = useState(false);
+  const [showCreateEventDialog, setShowCreateEventDialog] = useState(false);
 
   // Initialize selected relays
   useEffect(() => {
@@ -158,16 +210,87 @@ export default function AdminEvents() {
   }, [initialPublishRelays, selectedRelays.length]);
 
   // Fetch events
-  const { data: allEvents, refetch } = useQuery({
-    queryKey: ['admin-events'],
+  const { data: allEvents, refetch } = useQuery<AdminEvent[]>({
+    queryKey: ['admin-events-list'],
     queryFn: async () => {
-      const signal = AbortSignal.timeout(5000);
-      const events = await nostr!.query([
-        { kinds: [31922, 31923], limit: 100 }
-      ], { signal });
+      if (!nostr) {
+        console.error('[AdminEvents] nostr is null - relay connection failed');
+        return [];
+      }
 
-      return events.map(event => {
+      const signal = AbortSignal.timeout(10000);
+
+      // Query from default relay only
+      // This is the same relay we publish to
+      let events;
+      try {
+        events = await nostr.query([
+          { kinds: [31922, 31923, 30312, 30313], limit: 100 }
+        ], { signal });
+      } catch (error) {
+        console.error('[AdminEvents] Query failed:', error);
+        return [];
+      }
+
+      // Build a room lookup from any 30312 room events in the response
+      const roomMap = new Map<string, ReturnType<typeof parseRoomEvent>>();
+      for (const event of events) {
+        if (event.kind === 30312) {
+          const room = parseRoomEvent(event);
+          const dTag = event.tags.find(([name]) => name === 'd')?.[1] || event.id;
+          const coords = `30312:${event.pubkey}:${dTag}`;
+          roomMap.set(coords, room);
+        }
+      }
+
+      const normalizedEvents = events.map((event): AdminEvent | null => {
         const tags = event.tags || [];
+
+        if (event.kind === 30312) {
+          // NIP-53 room event - skip display (room definitions, not events)
+          return null;
+        }
+
+        if (event.kind === 30313) {
+          // NIP-53 live event
+          const startTag = tags.find(([name]) => name === 'starts')?.[1] || '0';
+          const endTag = tags.find(([name]) => name === 'ends')?.[1];
+          const aTag = tags.find(([name]) => name === 'a')?.[1];
+          const dTag = tags.find(([name]) => name === 'd')?.[1] || event.id;
+          const status = (tags.find(([name]) => name === 'status')?.[1] || 'planned') as 'planned' | 'live' | 'ended';
+
+          const room = aTag ? roomMap.get(aTag) : undefined;
+          const serviceUrl = room?.serviceUrl || tags.find(([name]) => name === 'service')?.[1] || '';
+          const roomName = room?.name || (serviceUrl ? (() => { try { return new URL(serviceUrl).hostname; } catch { return 'Live Room'; } })() : 'Live Room');
+
+          return {
+            id: event.id,
+            pubkey: event.pubkey,
+            kind: 30313,
+            type: 'live',
+            title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
+            summary: tags.find(([name]) => name === 'summary')?.[1] || '',
+            image: tags.find(([name]) => name === 'image')?.[1],
+            start: Number(startTag),
+            end: endTag ? Number(endTag) : undefined,
+            timezone: tags.find(([name]) => name === 'start_tzid')?.[1],
+            status,
+            room: {
+              id: room?.id || '',
+              pubkey: room?.pubkey,
+              name: roomName,
+              serviceUrl,
+              status: 'closed',
+            },
+            tags,
+            created_at: event.created_at,
+            d: dTag,
+            roomServiceUrl: serviceUrl,
+            location: '',
+          } as AdminEvent;
+        }
+
+        // NIP-52 calendar event
         const startTag = tags.find(([name]) => name === 'start')?.[1] || '0';
         const endTag = tags.find(([name]) => name === 'end')?.[1];
         const { start, end } = parseCalendarEventStartEnd(
@@ -176,24 +299,36 @@ export default function AdminEvents() {
           endTag,
           event.created_at,
         );
+        const dTag = tags.find(([name]) => name === 'd')?.[1] || event.id;
 
         return {
           id: event.id,
+          pubkey: event.pubkey,
+          kind: event.kind as 31922 | 31923,
+          type: 'calendar',
           title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
           summary: tags.find(([name]) => name === 'summary')?.[1] || '',
-          description: event.content,
+          image: tags.find(([name]) => name === 'image')?.[1],
           location: tags.find(([name]) => name === 'location')?.[1] || '',
           start,
           end,
-          kind: event.kind as 31922 | 31923,
+          timezone: undefined,
+          tags,
+          created_at: event.created_at,
           status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
-          d: tags.find(([name]) => name === 'd')?.[1] || event.id,
-          image: tags.find(([name]) => name === 'image')?.[1],
-          pubkey: event.pubkey,
-        };
+          d: dTag,
+        } as AdminEvent;
       });
+
+      return normalizedEvents.filter((event): event is AdminEvent =>
+        // Deduplicate by event ID and filter out nulls
+        event !== null && normalizedEvents.findIndex(e => e && e.id === event.id) === normalizedEvents.indexOf(event)
+      );
     },
     enabled: !!nostr,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 
   const handleRefresh = async () => {
@@ -206,23 +341,23 @@ export default function AdminEvents() {
   };
 
   // Filter events based on nostr.json users
-  const events = filterByNostrJson && remoteNostrJson?.names
-    ? allEvents?.filter(event => {
-      const normalizedPubkey = event.pubkey.toLowerCase().trim();
-      return Object.values(remoteNostrJson.names).some(
-        pubkey => pubkey.toLowerCase().trim() === normalizedPubkey
-      );
-    })
-    : allEvents;
+  // TEMPORARILY DISABLED FOR DEBUGGING
+  const events = allEvents;
+
+  // Apply time filter (past/upcoming/all)
+  const filteredByTime = allEvents?.filter(event => {
+    if (timeFilter === 'all') return true;
+    const isPast = event.end ? event.end * 1000 < Date.now() : event.start * 1000 < Date.now();
+    return timeFilter === 'past' ? isPast : !isPast;
+  }) ?? [];
 
   // Check if form is dirty
   const isDirty = editingEvent
     ? (formData.title !== editingEvent.title ||
-      formData.description !== editingEvent.description ||
       formData.summary !== editingEvent.summary ||
       formData.location !== editingEvent.location ||
       formData.status !== editingEvent.status)
-    : (formData.title.trim() !== '' || formData.description.trim() !== '');
+    : (formData.title.trim() !== '' || formData.summary.trim() !== '');
 
   // Prevent accidental navigation
   useEffect(() => {
@@ -245,7 +380,6 @@ export default function AdminEvents() {
     setFormData({
       title: '',
       summary: '',
-      description: '',
       location: '',
       startDate: '',
       startTime: '',
@@ -256,11 +390,12 @@ export default function AdminEvents() {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !formData.title.trim()) return;
 
-    if (eventType === 'date') {
+    try {
+      if (eventType === 'date') {
       // Date-based event (kind 31922)
       // NIP-52: start/end tags must be in ISO 8601 format (YYYY-MM-DD)
       const startDateStr = formData.startDate; // Already in YYYY-MM-DD from input type="date"
@@ -290,10 +425,10 @@ export default function AdminEvents() {
         tags.push(['image', formData.image]);
       }
 
-      publishEvent({
+      await publishEvent.mutateAsync({
         event: {
           kind: 31922,
-          content: formData.description,
+          content: '',
           tags,
           created_at: Math.floor(Date.now() / 1000),
         },
@@ -334,10 +469,10 @@ export default function AdminEvents() {
         tags.push(['image', formData.image]);
       }
 
-      publishEvent({
+      await publishEvent.mutateAsync({
         event: {
           kind: 31923,
-          content: formData.description,
+          content: '',
           tags,
           created_at: Math.floor(Date.now() / 1000),
         },
@@ -349,7 +484,6 @@ export default function AdminEvents() {
     setFormData({
       title: '',
       summary: '',
-      description: '',
       location: '',
       startDate: '',
       startTime: '',
@@ -360,10 +494,15 @@ export default function AdminEvents() {
     });
     setIsCreating(false);
     setEditingEvent(null);
-    refetch();
+
+    await refetch();
+    queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
+  } catch (error) {
+    console.error('Failed to save event:', error);
+  }
   };
 
-  const handleEdit = (event: MeetupEvent) => {
+  const handleEdit = (event: AdminEvent) => {
     if (user && event.pubkey !== user.pubkey) {
       alert("You cannot edit another user's event.");
       return;
@@ -385,8 +524,7 @@ export default function AdminEvents() {
     setFormData({
       title: event.title,
       summary: event.summary,
-      description: event.description,
-      location: event.location,
+      location: event.location || '',
       startDate: startDate.toISOString().split('T')[0],
       startTime: startDate.toTimeString().slice(0, 5),
       endDate: endDate ? endDate.toISOString().split('T')[0] : '',
@@ -400,22 +538,31 @@ export default function AdminEvents() {
     window.scrollTo(0, 0);
   };
 
-  const handleDelete = (event: MeetupEvent) => {
+  const handleDelete = (event: AdminEvent) => {
     if (user && event.pubkey !== user.pubkey) {
       alert("You cannot delete another user's event.");
       return;
     }
     if (confirm('Are you sure you want to delete this event?')) {
-      publishEvent({
-        event: {
-          kind: 5,
-          content: '',
-          tags: [['e', event.id]],
-          created_at: Math.floor(Date.now() / 1000),
+      const relays = selectedRelays.length > 0 ? selectedRelays : initialPublishRelays;
+
+      // Delete the event, then refetch after it's published
+      publishEvent.mutate(
+        {
+          event: {
+            kind: 5,
+            content: '',
+            tags: [['e', event.id]],
+            created_at: Math.floor(Date.now() / 1000),
+          },
+          relays,
         },
-        relays: selectedRelays,
-      });
-      refetch();
+        {
+          onSuccess: () => {
+            refetch();
+          },
+        }
+      );
     }
   };
 
@@ -580,39 +727,6 @@ export default function AdminEvents() {
                   )}
                 </div>
 
-                <div>
-                  <Label htmlFor="description">Description (Markdown)</Label>
-                  <Tabs defaultValue="edit" className="mt-2">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="edit">
-                        <Layout className="h-4 w-4 mr-2" />
-                        Edit
-                      </TabsTrigger>
-                      <TabsTrigger value="preview">
-                        <Eye className="h-4 w-4 mr-2" />
-                        Preview
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="edit" className="mt-2">
-                      <Textarea
-                        id="description"
-                        value={formData.description}
-                        onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                        placeholder="Event details and description in Markdown..."
-                        className="min-h-[200px] font-mono"
-                        required
-                      />
-                    </TabsContent>
-                    <TabsContent value="preview" className="mt-2">
-                      <div className="min-h-[200px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {formData.description || "*Nothing to preview*"}
-                        </ReactMarkdown>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </div>
-
                 {/* Relay Selection */}
                 <div className="space-y-3 pt-4 border-t">
                   <div className="flex items-center gap-2 text-sm font-medium">
@@ -666,58 +780,113 @@ export default function AdminEvents() {
         </>
       ) : (
         <>
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
+          <div className="space-y-3">
+            <div>
               <h2 className="text-2xl font-bold tracking-tight">Events</h2>
               <p className="text-muted-foreground">
                 Manage events and RSVPs.
               </p>
-              <div className="mt-3 max-w-sm">
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by username..."
-                    value={usernameSearch}
-                    onChange={(e) => setUsernameSearch(e.target.value)}
-                    className="pl-8"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2 mt-3">
-                <Switch
-                  id="filter-nostr-json-events"
-                  checked={filterByNostrJson}
-                  onCheckedChange={setFilterByNostrJson}
-                />
-                <Label htmlFor="filter-nostr-json-events" className="text-sm cursor-pointer flex items-center gap-2">
-                  <Filter className="h-3 w-3" />
-                  Show only users from nostr.json
-                </Label>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <ExpandableSearch
+                value={usernameSearch}
+                onChange={setUsernameSearch}
+                placeholder="Search by username..."
+                open={searchOpen}
+                onOpenChange={setSearchOpen}
+              />
+              <div className="flex gap-2 ml-auto">
+                <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button
+                  variant={viewMode === 'list' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setViewMode('list')}
+                >
+                  <List className="h-4 w-4 mr-2" />
+                  List
+                </Button>
+                <Button
+                  variant={viewMode === 'calendar' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setViewMode('calendar')}
+                >
+                  <LayoutGrid className="h-4 w-4 mr-2" />
+                  Calendar
+                </Button>
+                <Button onClick={() => setShowCreateEventDialog(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Event
+                </Button>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                Refresh
+              <Switch
+                id="filter-nostr-json-events"
+                checked={filterByNostrJson}
+                onCheckedChange={setFilterByNostrJson}
+              />
+              <Label htmlFor="filter-nostr-json-events" className="text-sm cursor-pointer flex items-center gap-2">
+                <Filter className="h-3 w-3" />
+                Show only users from nostr.json
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-sm flex items-center gap-2">
+                <Clock className="h-3 w-3" />
+                Time:
+              </Label>
+              <Button
+                variant={timeFilter === 'all' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTimeFilter('all')}
+              >
+                All
               </Button>
-              <Button onClick={() => setIsCreating(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Event
+              <Button
+                variant={timeFilter === 'upcoming' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTimeFilter('upcoming')}
+              >
+                Upcoming
+              </Button>
+              <Button
+                variant={timeFilter === 'past' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTimeFilter('past')}
+              >
+                Past
               </Button>
             </div>
           </div>
 
           <div className="space-y-4">
-            {events?.map((event) => (
-              <EventCard
-                key={event.id}
-                event={event}
-                user={user}
-                usernameSearch={usernameSearch}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
-            ))}
+            {viewMode === 'calendar' ? (
+              <CalendarErrorBoundary onRetry={refetch}>
+                <CalendarGrid
+                  events={filteredByTime}
+                  viewMode="month"
+                  onEventClick={(event) => handleEdit(event as AdminEvent)}
+                />
+              </CalendarErrorBoundary>
+            ) : (
+              <div className="space-y-4">
+                {filteredByTime.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    user={user}
+                    usernameSearch={usernameSearch}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    relayUrl={defaultRelayUrl || ''}
+                    publishRelays={initialPublishRelays}
+                  />
+                ))}
+              </div>
+            )}
 
             {(!events || events.length === 0) && (
               <Card>
@@ -729,6 +898,15 @@ export default function AdminEvents() {
           </div>
         </>
       )}
+
+      <CreateEventDialog
+        open={showCreateEventDialog}
+        onOpenChange={setShowCreateEventDialog}
+        onSuccess={() => {
+          refetch();
+          queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
+        }}
+      />
     </div>
   );
 }

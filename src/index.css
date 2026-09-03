@@ -97,3 +97,64 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Indeterminate loading bar animation for ZapLoadingProgress */
+@keyframes loading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.animate-loading {
+  animation: loading 1.5s ease-in-out infinite;
+}
+
+/* Snake-style loading animation for buttons — a gradient segment travels
+   along the button's border edge. Uses a conic-gradient mask so only the
+   border shows the moving highlight, like a snake chasing its tail. */
+@keyframes btn-snake {
+  to { --btn-snake-angle: 360deg; }
+}
+
+@property --btn-snake-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.btn-loading-snake {
+  position: relative;
+  /* Override disabled:opacity-50 from button variants so the animation
+     is clearly visible even while the button is disabled. */
+  opacity: 1 !important;
+}
+.btn-loading-snake::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--btn-snake-angle),
+    hsl(199 100% 70%) 0deg,
+    hsl(199 100% 70%) 90deg,
+    transparent 90deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: btn-snake 1s linear infinite;
+  pointer-events: none;
+}
+
+/* Prose image defaults — cap width and center so images don't fill
+   the full content column. Individual <img> tags with inline width
+   styles override these defaults. */
+.prose img {
+  max-width: min(100%, 640px);
+  height: auto;
+  margin-inline: auto;
+  border-radius: var(--radius);
+}

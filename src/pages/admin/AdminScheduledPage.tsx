@@ -4,7 +4,8 @@
  * View, delete, and monitor scheduled Kind 1 notes and Kind 30023 blog posts
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -18,6 +19,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { NoteContent } from '@/components/NoteContent';
 import { toast } from '@/hooks/useToast';
 import { useSchedulerHealth } from '@/hooks/useSchedulerHealth';
 import {
@@ -31,9 +41,18 @@ import {
   Loader2,
   Edit2,
   AlertCircle,
+  Repeat,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import type { NostrEvent } from '@nostrify/nostrify';
 import type { ScheduledPost } from '@/types/scheduled';
+import {
+  getScheduledPostKind,
+  getScheduledPostPreview,
+  getScheduledPostRepostKindLabel,
+  getScheduledPostImage,
+} from '@/lib/scheduledPostPreview';
+import { CalendarGrid, type CalendarItem } from '@/components/admin/CalendarGrid';
 
 interface ScheduledPostCardProps {
   post: ScheduledPost;
@@ -45,18 +64,33 @@ function ScheduledPostCard({ post, onDelete, onEdit }: ScheduledPostCardProps) {
   const timeRemaining = getTimeRemaining(post.scheduled_for);
   const isNote = post.kind === 1;
   const isBlog = post.kind === 30023;
+  const isRepost = post.kind === 6 || post.kind === 16;
+
+  // Extract repeat metadata from the signed event's tags
+  const repeatTotal = post.signed_event.tags?.find(([t]) => t === 'repeat_total')?.[1];
+  const repeatIndex = post.signed_event.tags?.find(([t]) => t === 'repeat_index')?.[1];
+  const repeatInterval = post.signed_event.tags?.find(([t]) => t === 'repeat_interval')?.[1];
+  const hasRepeat = repeatTotal && repeatIndex && repeatInterval && Number(repeatTotal) > 1;
+
+  // Compute the end date of the series: this post's date + remaining posts × interval
+  let repeatEndDate: Date | null = null;
+  if (hasRepeat) {
+    const remaining = Number(repeatTotal) - Number(repeatIndex) - 1;
+    repeatEndDate = new Date(
+      new Date(post.scheduled_for).getTime() + remaining * Number(repeatInterval) * 1000,
+    );
+  }
 
   // Get content preview
-  const contentPreview = isNote
-    ? post.signed_event.content.slice(0, 200)
-    : post.signed_event.tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
+  const contentPreview = getScheduledPostPreview(post);
+  const repostKindLabel = getScheduledPostRepostKindLabel(post);
 
   return (
     <Card className={post.status === 'published' ? 'opacity-60' : ''}>
       <CardContent className="pt-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 space-y-2">
-            <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 variant={
                   post.status === 'published'
@@ -87,51 +121,67 @@ function ScheduledPostCard({ post, onDelete, onEdit }: ScheduledPostCardProps) {
                   Blog Post
                 </Badge>
               )}
+              {isRepost && (
+                <Badge variant="outline" className="text-xs">
+                  <Repeat className="h-3 w-3 mr-1" />
+                  Repost{repostKindLabel ? ` · ${repostKindLabel}` : ''}
+                </Badge>
+              )}
             </div>
 
-            <p className="text-sm text-foreground">{contentPreview}</p>
+            <p className="text-sm text-foreground break-words line-clamp-3">{contentPreview}</p>
 
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <div className="flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
+                <Calendar className="h-3 w-3 shrink-0" />
                 {format(new Date(post.scheduled_for), 'MMM d, yyyy · h:mm a')}
               </div>
               {post.status === 'pending' && (
                 <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
+                  <Clock className="h-3 w-3 shrink-0" />
                   {timeRemaining.text}
                 </div>
               )}
             </div>
 
-            {post.status === 'failed' && post.error_message && (
-              <p className="text-xs text-destructive">{post.error_message}</p>
+            {hasRepeat && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Repeat className="h-3 w-3 shrink-0" />
+                Repeating · {Number(repeatIndex) + 1} of {repeatTotal}
+                {repeatEndDate && ` · ends ${format(repeatEndDate, 'MMM d, yyyy')}`}
+              </div>
             )}
 
-            <div className="text-xs text-muted-foreground">
+            {post.status === 'failed' && post.error_message && (
+              <p className="text-xs text-destructive break-words">{post.error_message}</p>
+            )}
+
+            <div className="text-xs text-muted-foreground break-words">
               Relays: {post.relays.length} · {post.relays[0]?.replace('wss://', '')}
               {post.relays.length > 1 && ` +${post.relays.length - 1}`}
             </div>
 
             {post.published_at && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground break-words">
                 Published at {format(new Date(post.published_at), 'MMM d, yyyy · h:mm a')}
               </p>
             )}
           </div>
 
-          <div className="flex gap-1">
+          <div className="flex gap-1 shrink-0 self-end sm:self-auto">
             {post.status === 'pending' && (
               <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => onEdit(post)}
-                  title="Edit scheduled post"
-                >
-                  <Edit2 className="h-4 w-4" />
-                </Button>
+                {!isRepost && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => onEdit(post)}
+                    title="Edit scheduled post"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -150,6 +200,259 @@ function ScheduledPostCard({ post, onDelete, onEdit }: ScheduledPostCardProps) {
   );
 }
 
+interface ScheduledPostCalendarItemData extends CalendarItem {
+  post: ScheduledPost;
+}
+
+interface ScheduledPostCalendarItemProps {
+  item: ScheduledPostCalendarItemData;
+  compact: boolean;
+  onClick: () => void;
+}
+
+function ScheduledPostCalendarItem({
+  item,
+  compact,
+  onClick,
+}: ScheduledPostCalendarItemProps): ReactNode {
+  const post = item.post;
+  const kind = getScheduledPostKind(post);
+  const preview = getScheduledPostPreview(post);
+
+  const statusColor =
+    post.status === 'published'
+      ? 'bg-green-100 text-green-900 border-green-200 hover:bg-green-200'
+      : post.status === 'failed'
+        ? 'bg-red-100 text-red-900 border-red-200 hover:bg-red-200'
+        : 'bg-yellow-100 text-yellow-900 border-yellow-200 hover:bg-yellow-200';
+
+  if (compact) {
+    return (
+      <div
+        onClick={onClick}
+        className={`cursor-pointer rounded border p-1 text-xs ${statusColor}`}
+      >
+        <div className="flex items-center gap-1">
+          {kind === 'note' && <FileText className="h-3 w-3 shrink-0" />}
+          {kind === 'blog' && <FileCode className="h-3 w-3 shrink-0" />}
+          {kind === 'repost' && <Repeat className="h-3 w-3 shrink-0" />}
+          <span className="truncate">{preview}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={onClick}
+      className={`cursor-pointer rounded border p-2 text-xs ${statusColor}`}
+    >
+      <div className="flex items-start gap-2">
+        {item.image && (
+          <img
+            src={item.image}
+            alt=""
+            className="h-10 w-10 rounded object-cover shrink-0"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1 font-medium">
+            {kind === 'note' && <FileText className="h-3 w-3 shrink-0" />}
+            {kind === 'blog' && <FileCode className="h-3 w-3 shrink-0" />}
+            {kind === 'repost' && <Repeat className="h-3 w-3 shrink-0" />}
+            <span className="truncate capitalize">{kind}</span>
+            <span className="text-[10px] opacity-70 uppercase">· {post.status}</span>
+          </div>
+          <p className="line-clamp-2 mt-1">{preview}</p>
+          <p className="text-[10px] opacity-70 mt-1">
+            {format(new Date(post.scheduled_for), 'h:mm a')}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ScheduledPostPreviewDialogProps {
+  post: ScheduledPost | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDelete: (id: string) => void;
+  onEdit: (post: ScheduledPost) => void;
+}
+
+function ScheduledPostPreviewDialog({
+  post,
+  open,
+  onOpenChange,
+  onDelete,
+  onEdit,
+}: ScheduledPostPreviewDialogProps) {
+  if (!post) return null;
+
+  const kind = getScheduledPostKind(post);
+  const scheduledAt = new Date(post.scheduled_for);
+  const isEditable = post.status === 'pending' && post.kind !== 6 && post.kind !== 16;
+
+  let contentNode: ReactNode;
+
+  if (kind === 'repost') {
+    try {
+      const original = JSON.parse(post.signed_event.content) as NostrEvent;
+      contentNode = (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Repost of kind {original.kind} note
+          </p>
+          <NoteContent
+            event={{ ...original, sig: original.sig || '' }}
+            className="text-sm whitespace-pre-wrap break-words"
+          />
+        </div>
+      );
+    } catch {
+      contentNode = (
+        <p className="text-sm text-muted-foreground">
+          {getScheduledPostPreview(post)}
+        </p>
+      );
+    }
+  } else if (kind === 'blog') {
+    const title = post.signed_event.tags.find(([t]) => t === 'title')?.[1] || 'Untitled';
+    const summary = post.signed_event.tags.find(([t]) => t === 'summary')?.[1] || '';
+    const image = post.signed_event.tags.find(([t]) => t === 'image')?.[1];
+    contentNode = (
+      <div className="space-y-4">
+        {image && (
+          <img
+            src={image}
+            alt=""
+            className="max-w-full max-h-[300px] object-contain rounded-lg border"
+          />
+        )}
+        <div>
+          <h3 className="font-semibold">{title}</h3>
+          {summary && <p className="text-sm text-muted-foreground">{summary}</p>}
+        </div>
+        <NoteContent
+          event={post.signed_event}
+          className="text-sm whitespace-pre-wrap break-words"
+        />
+      </div>
+    );
+  } else {
+    contentNode = (
+      <NoteContent
+        event={post.signed_event}
+        className="text-sm whitespace-pre-wrap break-words"
+      />
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base flex items-center gap-2">
+            {kind === 'note' && <FileText className="h-4 w-4" />}
+            {kind === 'blog' && <FileCode className="h-4 w-4" />}
+            {kind === 'repost' && <Repeat className="h-4 w-4" />}
+            <span className="capitalize">{kind}</span>
+            <Badge
+              variant={
+                post.status === 'published'
+                  ? 'default'
+                  : post.status === 'failed'
+                    ? 'destructive'
+                    : 'secondary'
+              }
+              className="text-[10px]"
+            >
+              {post.status}
+            </Badge>
+          </DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            Scheduled for {format(scheduledAt, 'MMM d, yyyy · h:mm a')}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-y-auto pr-1 -mr-1 space-y-4">
+          {contentNode}
+        </div>
+        <DialogFooter className="flex flex-row justify-end gap-2 mt-4">
+          {isEditable && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onEdit(post);
+                onOpenChange(false);
+              }}
+            >
+              <Edit2 className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          )}
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              onDelete(post.id);
+              onOpenChange(false);
+            }}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface ScheduledPostsDayDialogProps {
+  date: Date | null;
+  items: ScheduledPostCalendarItemData[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onItemClick: (item: ScheduledPostCalendarItemData) => void;
+}
+
+function ScheduledPostsDayDialog({
+  date,
+  items,
+  open,
+  onOpenChange,
+  onItemClick,
+}: ScheduledPostsDayDialogProps) {
+  if (!date) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>{format(date, 'MMMM d, yyyy')}</DialogTitle>
+          <DialogDescription>
+            {items.length} scheduled post{items.length === 1 ? '' : 's'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-y-auto pr-1 -mr-1 space-y-2">
+          {items.map((item) => (
+            <ScheduledPostCalendarItem
+              key={item.id}
+              item={item}
+              compact={false}
+              onClick={() => {
+                onItemClick(item);
+                onOpenChange(false);
+              }}
+            />
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AdminScheduledPage() {
   const { user } = useCurrentUser();
   const navigate = useNavigate();
@@ -157,7 +460,13 @@ export default function AdminScheduledPage() {
   const { data: stats } = useScheduledPostsStats(user?.pubkey);
   const { mutateAsync: deletePost } = useDeleteScheduledPost();
   const { mutateAsync: clearHistory, isPending: isClearingHistory } = useClearScheduledPostsHistory();
-  const [activeTab, setActiveTab] = useState<'pending' | 'published' | 'failed'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'published' | 'failed' | 'calendar'>('pending');
+  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week'>('month');
+  const [previewPost, setPreviewPost] = useState<ScheduledPost | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [dayDialogDate, setDayDialogDate] = useState<Date | null>(null);
+  const [dayDialogItems, setDayDialogItems] = useState<ScheduledPostCalendarItemData[]>([]);
+  const [dayDialogOpen, setDayDialogOpen] = useState(false);
   const { data: isSchedulerHealthy, isLoading: isHealthLoading } = useSchedulerHealth();
 
   const handleDelete = async (id: string) => {
@@ -209,10 +518,35 @@ export default function AdminScheduledPage() {
     navigate(targetPath, { state: { editingScheduledPost: editData } });
   };
 
+  const handleCalendarItemClick = (item: ScheduledPostCalendarItemData) => {
+    setPreviewPost(item.post);
+    setPreviewOpen(true);
+  };
+
+  const handleShowMore = (date: Date, items: ScheduledPostCalendarItemData[]) => {
+    setDayDialogDate(date);
+    setDayDialogItems(items);
+    setDayDialogOpen(true);
+  };
+
+  const calendarItems = useMemo<ScheduledPostCalendarItemData[]>(() => {
+    return (scheduledPosts || [])
+      .filter((post) => post.status === 'pending' || post.status === 'published')
+      .map((post) => ({
+        id: post.id,
+        start: Math.floor(new Date(post.scheduled_for).getTime() / 1000),
+        title: getScheduledPostPreview(post),
+        image: getScheduledPostImage(post),
+        status: post.status,
+        type: getScheduledPostKind(post),
+        post,
+      }));
+  }, [scheduledPosts]);
+
   const pendingPosts = scheduledPosts?.filter((post) => post.status === 'pending') || [];
   const publishedPosts = scheduledPosts?.filter((post) => post.status === 'published') || [];
   const failedPosts = scheduledPosts?.filter((post) => post.status === 'failed') || [];
-  const filteredPosts = activeTab === 'pending' ? pendingPosts : activeTab === 'published' ? publishedPosts : failedPosts;
+  const filteredPosts = activeTab === 'pending' ? pendingPosts : activeTab === 'published' ? publishedPosts : activeTab === 'failed' ? failedPosts : [];
 
   const handleClearHistory = async (status: 'published' | 'failed') => {
     if (!user?.pubkey) return;
@@ -339,8 +673,8 @@ export default function AdminScheduledPage() {
       )}
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'pending' | 'published' | 'failed')}>
-        <TabsList className="grid w-fit grid-cols-3">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'pending' | 'published' | 'failed' | 'calendar')}>
+        <TabsList className="grid w-full grid-cols-4 sm:w-fit">
           <TabsTrigger value="pending">
             Pending
             {stats && stats.pending > 0 && (
@@ -364,6 +698,10 @@ export default function AdminScheduledPage() {
                 {stats.failed}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="calendar" className="gap-1">
+            <Calendar className="h-3 w-3" />
+            Calendar
           </TabsTrigger>
         </TabsList>
 
@@ -463,7 +801,57 @@ export default function AdminScheduledPage() {
             </Card>
           )}
         </TabsContent>
+
+        <TabsContent value="calendar" className="mt-4 space-y-4">
+          {isLoading ? (
+            <Card>
+              <CardContent className="pt-6 flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </CardContent>
+            </Card>
+          ) : calendarItems.length > 0 ? (
+            <CalendarGrid
+              items={calendarItems}
+              viewMode={calendarViewMode}
+              onViewModeChange={setCalendarViewMode}
+              renderItem={({ item, compact, onClick }) => (
+                <ScheduledPostCalendarItem
+                  item={item as ScheduledPostCalendarItemData}
+                  compact={compact}
+                  onClick={onClick}
+                />
+              )}
+              onItemClick={handleCalendarItemClick}
+              onShowMore={handleShowMore}
+            />
+          ) : (
+            <Card>
+              <CardContent className="pt-6 text-center">
+                <p className="text-muted-foreground">No pending or published scheduled posts.</p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Schedule posts from the Notes or Blog pages.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
       </Tabs>
+
+      <ScheduledPostPreviewDialog
+        post={previewPost}
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        onDelete={handleDelete}
+        onEdit={handleEdit}
+      />
+
+      <ScheduledPostsDayDialog
+        date={dayDialogDate}
+        items={dayDialogItems}
+        open={dayDialogOpen}
+        onOpenChange={setDayDialogOpen}
+        onItemClick={handleCalendarItemClick}
+      />
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { nip19 } from 'nostr-tools';
 import { useLocation } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,31 +6,41 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useToast } from '@/hooks/useToast';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Edit, Trash2, Eye, Layout, Share2, Search, Image as ImageIcon, Library, Loader2, Clock, Filter, RefreshCw } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Layout, Share2, Image as ImageIcon, Loader2, Clock, Filter, RefreshCw, Search, ChevronDown, X, User, Repeat } from 'lucide-react';
 import { MediaSelectorDialog } from './MediaSelectorDialog';
 import { SchedulePicker } from './SchedulePicker';
+import { MarkdownToolbar } from './settings/MarkdownToolbar';
+import { PageContent } from './settings/PageContent';
+import { RepostDialog } from './RepostDialog';
 import { useCreateScheduledPost, useUpdateScheduledPost } from '@/hooks/useScheduledPosts';
 import { useSchedulerHealth } from '@/hooks/useSchedulerHealth';
 import type { ScheduleConfig } from '@/components/admin/SchedulePicker';
 import type { NostrEvent } from '@/types/scheduled';
 import { BlossomUploader } from '@nostrify/nostrify/uploaders';
+import { stripImageMetadata } from '@/lib/mediaProcessing';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useRemoteNostrJson } from '@/hooks/useRemoteNostrJson';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthor } from '@/hooks/useAuthor';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useQuery } from '@tanstack/react-query';
@@ -46,90 +55,87 @@ interface BlogPost {
   d: string;
   pubkey: string;
   kind: number;
+  image?: string;
+  sig: string;
 }
 
-function AuthorInfo({ pubkey }: { pubkey: string }) {
-  const { data: author } = useAuthor(pubkey);
-
-  let npub = '';
-  try {
-    if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) {
-      npub = nip19.npubEncode(pubkey);
-    }
-  } catch (e) {
-    console.error('Error encoding npub:', e);
-  }
-
-  return (
-    <div className="flex items-center gap-2">
-      <Avatar className="h-5 w-5">
-        <AvatarImage src={author?.metadata?.picture} />
-        <AvatarFallback>{author?.metadata?.name?.charAt(0) || '?'}</AvatarFallback>
-      </Avatar>
-      {npub ? (
-        <a
-          href={`https://nostr.at/${npub}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-medium hover:underline"
-        >
-          {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-        </a>
-      ) : (
-        <span className="text-xs font-medium">
-          {author?.metadata?.name || author?.metadata?.display_name || 'Anonymous'}
-        </span>
-      )}
-    </div>
-  );
+function timeAgo(timestamp: number): string {
+  const seconds = Math.floor(Date.now() / 1000 - timestamp);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
 }
 
-function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
+function BlogPostCard({ post, user, searchQuery, onEdit, onDelete, relayUrl, publishRelays }: {
   post: BlogPost;
   user: { pubkey: string } | undefined;
-  usernameSearch: string;
+  searchQuery: string;
   onEdit: (post: BlogPost) => void;
   onDelete: (post: BlogPost) => void;
+  relayUrl: string;
+  publishRelays: string[];
 }) {
   const { data: author } = useAuthor(post.pubkey);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [repostOpen, setRepostOpen] = useState(false);
 
-  // Filter by username search
-  if (usernameSearch.trim()) {
-    const username = author?.metadata?.name || author?.metadata?.display_name || '';
-    if (!username.toLowerCase().includes(usernameSearch.toLowerCase())) {
+  // Filter by search query (title + content)
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    if (!post.title.toLowerCase().includes(q) && !post.content.toLowerCase().includes(q)) {
       return null;
     }
   }
 
+  const displayName = author?.metadata?.name || author?.metadata?.display_name || `${post.pubkey.slice(0, 8)}...`;
+  const canEdit = user && post.pubkey === user.pubkey;
+
   return (
-    <Card>
+    <Card className="hover:bg-muted/30 transition-colors">
       <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <div className="space-y-2 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-semibold">{post.title}</h3>
-              <Badge variant={post.published ? 'default' : 'secondary'}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-semibold break-words">{post.title}</h3>
+              <Badge variant={post.published ? 'default' : 'secondary'} className="shrink-0">
                 {post.published ? 'Published' : 'Draft'}
               </Badge>
-              <Badge variant="outline" className="text-[10px] font-mono">
-                Kind {post.kind}
-              </Badge>
             </div>
-            <AuthorInfo pubkey={post.pubkey} />
-            <p className="text-sm text-muted-foreground line-clamp-2">
-              {post.content.replace(/[*#>`]/g, '').slice(0, 200)}...
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Created: {new Date(post.created_at * 1000).toLocaleDateString()}
+            <div className="flex items-center gap-2">
+              <Avatar className="h-6 w-6">
+                <AvatarImage src={author?.metadata?.picture} alt={displayName} />
+                <AvatarFallback><User className="h-3 w-3" /></AvatarFallback>
+              </Avatar>
+              <span className="text-sm text-muted-foreground">{displayName}</span>
+              <span className="text-xs text-muted-foreground">·</span>
+              <span className="text-xs text-muted-foreground">{timeAgo(post.created_at)}</span>
+            </div>
+            <p className="text-sm text-muted-foreground line-clamp-2 break-words">
+              {post.content.replace(/[*#>`]/g, '').slice(0, 200)}
             </p>
           </div>
-          <div className="flex gap-2 ml-4">
-            {user && post.pubkey === user.pubkey && (
+          <div className="flex gap-1 shrink-0">
+            <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)} title="Preview post">
+              <Eye className="h-4 w-4" />
+            </Button>
+            {post.published && (
+              <Button variant="ghost" size="sm" onClick={() => setRepostOpen(true)} title="Schedule repost">
+                <Repeat className="h-4 w-4" />
+              </Button>
+            )}
+            {canEdit && (
               <>
-                <Button variant="ghost" size="sm" onClick={() => onEdit(post)}>
+                <Button variant="ghost" size="sm" onClick={() => onEdit(post)} title="Edit post">
                   <Edit className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => onDelete(post)}>
+                <Button variant="ghost" size="sm" onClick={() => onDelete(post)} title="Delete post">
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </>
@@ -137,13 +143,61 @@ function BlogPostCard({ post, user, usernameSearch, onEdit, onDelete }: {
           </div>
         </div>
       </CardContent>
+
+      {/* Preview dialog — renders post content inline, no new tab */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col" hideCloseButton>
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pr-0">
+            <DialogTitle className="text-wrap break-words pr-8">{post.title}</DialogTitle>
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 shrink-0" title="Close">
+                <X className="h-5 w-5" />
+              </Button>
+            </DialogClose>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1 -mx-6 px-6 pb-2">
+            {post.image && (
+              <img src={post.image} alt={post.title} className="w-full h-auto max-h-[400px] object-contain rounded-lg mb-6" />
+            )}
+            <div className="prose prose-slate dark:prose-invert max-w-none">
+              <PageContent content={post.content} />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Repost dialog */}
+      {repostOpen && (
+        <RepostDialog
+          open={repostOpen}
+          onOpenChange={setRepostOpen}
+          target={{
+            id: post.id,
+            pubkey: post.pubkey,
+            kind: post.kind,
+            content: post.content,
+            tags: [
+              ['title', post.title],
+              ['d', post.d],
+              ...(post.image ? [['image', post.image] as [string, string]] : []),
+            ],
+            created_at: post.created_at,
+            sig: post.sig,
+            d: post.d,
+          }}
+          relayUrl={relayUrl}
+          publishRelays={publishRelays}
+          thumbnailUrl={post.image}
+          previewTitle={post.title}
+        />
+      )}
     </Card>
   );
 }
 
 export default function AdminBlog() {
   const location = useLocation();
-  const { nostr, publishRelays: initialPublishRelays } = useDefaultRelay();
+  const { nostr, defaultRelayUrl, publishRelays: initialPublishRelays } = useDefaultRelay();
   const { user } = useCurrentUser();
   const { config } = useAppContext();
   const { mutateAsync: publishEvent } = useNostrPublish();
@@ -154,15 +208,21 @@ export default function AdminBlog() {
   const [editingPost, setEditingPost] = useState<BlogPost | null>(null);
   const [editingScheduledPostId, setEditingScheduledPostId] = useState<string | null>(null);
   const [selectedRelays, setSelectedRelays] = useState<string[]>([]);
-  const [usernameSearch, setUsernameSearch] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterByNostrJson, setFilterByNostrJson] = useState(false);
+  const [postTab, setPostTab] = useState<'published' | 'drafts'>('published');
   const [formData, setFormData] = useState({
     title: '',
     content: '',
     published: false,
+    coverImage: '',
   });
-  const [showMediaSelector, setShowMediaSelector] = useState(false);
+  const [showCoverImageSelector, setShowCoverImageSelector] = useState(false);
+  // Track which action is in progress so only the clicked button shows loading.
+  // 'draft' = Save Draft, 'publish' = Publish/Schedule, null = idle.
+  const [pendingAction, setPendingAction] = useState<'draft' | 'publish' | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<BlogPost | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>({
@@ -170,7 +230,7 @@ export default function AdminBlog() {
     scheduledFor: null,
   });
 
-  const { mutateAsync: createScheduledPost, isPending: isScheduling } = useCreateScheduledPost();
+  const { mutateAsync: createScheduledPost } = useCreateScheduledPost();
   const { mutateAsync: updateScheduledPost } = useUpdateScheduledPost();
   const { data: isSchedulerHealthy } = useSchedulerHealth();
 
@@ -208,6 +268,7 @@ export default function AdminBlog() {
         title: editingScheduledPost.title || '',
         content: editingScheduledPost.content || '',
         published: true, // Blog posts are always published when scheduled
+        coverImage: editingScheduledPost.image || '',
       });
       setEditingScheduledPostId(editingScheduledPost.scheduledPostId);
       setScheduleConfig({
@@ -240,12 +301,22 @@ export default function AdminBlog() {
       const urls: string[] = [];
 
       for (const file of files) {
+        // Strip metadata from images before upload
+        const { file: strippedFile, stripped, reason } = await stripImageMetadata(file);
+        if (!stripped && reason === 'gif') {
+          toast({
+            title: 'Metadata not stripped',
+            description: `${file.name}: GIF files cannot be metadata-stripped. EXIF/GPS data may be visible.`,
+            variant: 'destructive',
+          });
+        }
+
         const uploader = new BlossomUploader({
           servers: [defaultBlossomRelay],
           signer: user.signer,
         });
 
-        const result = await uploader.upload(file);
+        const result = await uploader.upload(strippedFile);
         if (result && result.length > 0) {
           const urlTag = result.find((tag: string[]) => tag[0] === 'url');
           if (urlTag && urlTag[1]) {
@@ -324,7 +395,7 @@ export default function AdminBlog() {
 
   // Fetch blog posts
   const { data: allPosts, refetch } = useQuery({
-    queryKey: ['admin-blog-posts', user?.pubkey],
+    queryKey: ['admin-blog-posts-full', user?.pubkey],
     queryFn: async () => {
       const signal = AbortSignal.timeout(5000);
       const filters: NostrFilter[] = [{ kinds: [30023], limit: 100 }];
@@ -343,8 +414,10 @@ export default function AdminBlog() {
         const tags = event.tags || [];
         let content = event.content;
         let title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
-        let published = tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published');
+        // Kind 30023 is a published post by definition; only 31234 drafts are unpublished
+        let published = event.kind === 30023;
         let d = tags.find(([name]) => name === 'd')?.[1] || event.id;
+        let image = tags.find(([name]) => name === 'image')?.[1];
 
         // Handle Kind 31234 (NIP-37 Draft Wraps)
         if (event.kind === 31234) {
@@ -357,6 +430,7 @@ export default function AdminBlog() {
               const draftTags = draftEvent.tags || [];
               title = draftTags.find(([name]: string[]) => name === 'title')?.[1] || title;
               d = draftTags.find(([name]: string[]) => name === 'd')?.[1] || d;
+              image = draftTags.find(([name]: string[]) => name === 'image')?.[1] || image;
             } else if (user?.signer?.nip04) {
               const decrypted = await user.signer.nip04.decrypt(user.pubkey, event.content);
               const draftEvent = JSON.parse(decrypted);
@@ -364,6 +438,7 @@ export default function AdminBlog() {
               const draftTags = draftEvent.tags || [];
               title = draftTags.find(([name]: string[]) => name === 'title')?.[1] || title;
               d = draftTags.find(([name]: string[]) => name === 'd')?.[1] || d;
+              image = draftTags.find(([name]: string[]) => name === 'image')?.[1] || image;
             } else {
               // Try to parse as unencrypted JSON if no decryption available
               try {
@@ -372,6 +447,7 @@ export default function AdminBlog() {
                 const draftTags = draftEvent.tags || [];
                 title = draftTags.find(([name]: string[]) => name === 'title')?.[1] || title;
                 d = draftTags.find(([name]: string[]) => name === 'd')?.[1] || d;
+                image = draftTags.find(([name]: string[]) => name === 'image')?.[1] || image;
               } catch {
                 content = "[Encrypted Draft]";
               }
@@ -391,18 +467,23 @@ export default function AdminBlog() {
           d,
           pubkey: event.pubkey,
           kind: event.kind,
+          image,
+          sig: event.sig,
         };
       }));
 
-      // Deduplicate by d-tag, preferring Kind 31234 or newer events
+      // Deduplicate by d-tag+pubkey, keeping both published and draft versions
+      // if they exist (so they appear in their respective tabs).
       const deduped = processedPosts.reduce((acc: BlogPost[], post) => {
-        const existingIndex = acc.findIndex(p => p.d === post.d && p.pubkey === post.pubkey);
+        const existingIndex = acc.findIndex(p =>
+          p.d === post.d && p.pubkey === post.pubkey && p.published === post.published
+        );
         if (existingIndex === -1) {
           acc.push(post);
         } else {
           const existing = acc[existingIndex];
-          // Prefer 31234 (private draft) over 30023 if same d-tag, or newer event
-          if (post.kind === 31234 || post.created_at > existing.created_at) {
+          // Keep whichever event is newer within the same published/draft category
+          if (post.created_at > existing.created_at) {
             acc[existingIndex] = post;
           }
         }
@@ -424,6 +505,11 @@ export default function AdminBlog() {
     })
     : allPosts;
 
+  // Split into published and drafts for tabbed view
+  const publishedPosts = posts?.filter(p => p.published) ?? [];
+  const draftPosts = posts?.filter(p => !p.published) ?? [];
+  const tabbedPosts = postTab === 'published' ? publishedPosts : draftPosts;
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
@@ -435,7 +521,7 @@ export default function AdminBlog() {
 
   // Check if form is dirty
   const isDirty = editingPost
-    ? (formData.title !== editingPost.title || formData.content !== editingPost.content || formData.published !== editingPost.published)
+    ? (formData.title !== editingPost.title || formData.content !== editingPost.content)
     : (formData.title.trim() !== '' || formData.content.trim() !== '');
 
   // Prevent accidental navigation
@@ -457,12 +543,11 @@ export default function AdminBlog() {
     setIsCreating(false);
     setEditingPost(null);
     setEditingScheduledPostId(null);
-    setFormData({ title: '', content: '', published: false });
+    setFormData({ title: '', content: '', published: false, coverImage: '' });
     setScheduleConfig({ enabled: false, scheduledFor: null });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (asDraft: boolean) => {
     if (!user || !formData.title.trim() || !formData.content.trim()) return;
 
     if (editingPost && editingPost.pubkey !== user.pubkey) {
@@ -474,8 +559,10 @@ export default function AdminBlog() {
       return;
     }
 
-    // Handle scheduled posts
-    if (scheduleConfig.enabled && scheduleConfig.scheduledFor) {
+    setPendingAction(asDraft ? 'draft' : 'publish');
+
+    // Handle scheduled posts (only when publishing, not saving as draft)
+    if (!asDraft && scheduleConfig.enabled && scheduleConfig.scheduledFor) {
       try {
         const dTag = editingPost?.d || `blog-${Date.now()}`;
         const scheduledFor = scheduleConfig.scheduledFor;
@@ -486,6 +573,7 @@ export default function AdminBlog() {
           ['title', formData.title],
           ['published', 'true'],
           ['published_at', created_at.toString()],
+          ...(formData.coverImage ? [['image', formData.coverImage] as string[]] : []),
         ];
 
         // Create and sign the event with future timestamp
@@ -544,15 +632,17 @@ export default function AdminBlog() {
           });
         }
 
-        setFormData({ title: '', content: '', published: false });
+        setFormData({ title: '', content: '', published: false, coverImage: '' });
         setIsCreating(false);
         setEditingPost(null);
         setEditingScheduledPostId(null);
         setScheduleConfig({ enabled: false, scheduledFor: null });
+        setPendingAction(null);
         refetch();
         return;
       } catch (error) {
         console.error('Failed to schedule post:', error);
+        setPendingAction(null);
         toast({
           title: 'Error',
           description: (error as Error).message || 'Failed to schedule post.',
@@ -568,10 +658,11 @@ export default function AdminBlog() {
       const tags = [
         ['d', dTag],
         ['title', formData.title],
-        ['published', formData.published.toString()],
+        ['published', (!asDraft).toString()],
+        ...(formData.coverImage ? [['image', formData.coverImage] as string[]] : []),
       ];
 
-      if (formData.published) {
+      if (!asDraft) {
         // Publish as Kind 30023 (Long-form Content)
         await publishEvent({
           event: {
@@ -648,13 +739,15 @@ export default function AdminBlog() {
       }
 
       // Reset form
-      setFormData({ title: '', content: '', published: false });
+      setFormData({ title: '', content: '', published: false, coverImage: '' });
       setIsCreating(false);
       setEditingPost(null);
       setScheduleConfig({ enabled: false, scheduledFor: null });
+      setPendingAction(null);
       refetch();
     } catch (error: unknown) {
       console.error('Submit failed:', error);
+      setPendingAction(null);
       const errorMessage = error instanceof Error ? error.message : "Failed to save post.";
       toast({
         title: "Error",
@@ -677,6 +770,7 @@ export default function AdminBlog() {
       title: post.title,
       content: post.content,
       published: post.published,
+      coverImage: post.image || '',
     });
     setEditingPost(post);
     setIsCreating(true);
@@ -693,31 +787,28 @@ export default function AdminBlog() {
       });
       return;
     }
-    if (confirm('Are you sure you want to delete this post?')) {
-      try {
-        // Create a deletion event (kind 5)
-        // For replaceable events, we should use both e and a tags
-        await publishEvent({
-          event: {
-            kind: 5,
-            tags: [
-              ['e', post.id],
-              ['a', `${post.kind}:${post.pubkey}:${post.d}`]
-            ],
-          },
-          relays: selectedRelays,
-        });
-        toast({ title: "Success", description: "Post deleted successfully." });
-        refetch();
-      } catch (error: unknown) {
-        console.error('Delete failed:', error);
-        const errorMessage = error instanceof Error ? error.message : "Failed to delete post.";
-        toast({
-          title: "Error",
-          description: errorMessage,
-          variant: "destructive"
-        });
-      }
+    try {
+      await publishEvent({
+        event: {
+          kind: 5,
+          tags: [
+            ['e', post.id],
+            ['a', `${post.kind}:${post.pubkey}:${post.d}`]
+          ],
+        },
+        relays: selectedRelays,
+      });
+      toast({ title: "Success", description: "Post deleted successfully." });
+      setDeleteTarget(null);
+      refetch();
+    } catch (error: unknown) {
+      console.error('Delete failed:', error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete post.";
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
     }
   };
 
@@ -736,7 +827,47 @@ export default function AdminBlog() {
 
           <Card>
             <CardContent className="pt-6">
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+                {/* Cover Image */}
+                <div>
+                  <Label>Cover Image</Label>
+                  {formData.coverImage ? (
+                    <div className="relative mt-2 rounded-lg overflow-hidden border group">
+                      <img src={formData.coverImage} alt="Cover preview" className="w-full h-40 object-cover" />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="absolute top-2 right-2 h-8 w-8 p-0 opacity-90"
+                        onClick={() => setFormData(prev => ({ ...prev, coverImage: '' }))}
+                        title="Remove cover image"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-2 w-full h-32 border-dashed flex flex-col items-center justify-center gap-2 text-muted-foreground"
+                      onClick={() => setShowCoverImageSelector(true)}
+                    >
+                      <ImageIcon className="h-8 w-8" />
+                      <span className="text-sm">Choose cover image</span>
+                    </Button>
+                  )}
+                </div>
+
+                <MediaSelectorDialog
+                  open={showCoverImageSelector}
+                  onOpenChange={setShowCoverImageSelector}
+                  onSelect={(url) => {
+                    setFormData(prev => ({ ...prev, coverImage: url }));
+                    setShowCoverImageSelector(false);
+                  }}
+                  title="Choose Cover Image"
+                />
+
                 <div>
                   <Label htmlFor="title">Title</Label>
                   <Input
@@ -749,7 +880,7 @@ export default function AdminBlog() {
                 </div>
 
                 <div>
-                  <Label htmlFor="content">Content (Markdown)</Label>
+                  <Label htmlFor="content">Content</Label>
                   <Tabs defaultValue="edit" className="mt-2">
                     <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="edit">
@@ -762,110 +893,45 @@ export default function AdminBlog() {
                       </TabsTrigger>
                     </TabsList>
                     <TabsContent value="edit" className="mt-2">
+                      <MarkdownToolbar textareaId="blog-content" disabled={!!pendingAction || isUploading} />
+                      {isUploading && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Uploading media...
+                        </div>
+                      )}
                       <Textarea
-                        id="content"
+                        id="blog-content"
                         ref={textareaRef}
                         value={formData.content}
                         onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
                         onPaste={handlePaste}
                         onDrop={handleDrop}
-                        placeholder="Write your post in Markdown... (Paste or drop media files to upload)"
+                        placeholder="Write your post in Markdown..."
                         className="min-h-[300px] font-mono"
                         required
                       />
-                      <div className="flex items-center gap-2 mt-2">
-                        <input
-                          type="file"
-                          ref={fileInputRef}
-                          className="hidden"
-                          accept="image/*,video/*"
-                          multiple
-                          onChange={handleManualUpload}
-                        />
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9"
-                                onClick={() => fileInputRef.current?.click()}
-                                disabled={isUploading}
-                              >
-                                {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Upload Media</TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9"
-                                onClick={() => setShowMediaSelector(true)}
-                              >
-                                <Library className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Media Library</TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-
-                        <MediaSelectorDialog
-                          open={showMediaSelector}
-                          onOpenChange={setShowMediaSelector}
-                          onSelect={(url) => {
-                            const textarea = textareaRef.current;
-                            if (textarea) {
-                              const start = textarea.selectionStart;
-                              const end = textarea.selectionEnd;
-                              const newContent = formData.content.slice(0, start) + '\n' + url + '\n' + formData.content.slice(end);
-                              setFormData(prev => ({ ...prev, content: newContent }));
-                              setTimeout(() => {
-                                textarea.focus();
-                                textarea.setSelectionRange(start + url.length + 2, start + url.length + 2);
-                              }, 0);
-                            } else {
-                              setFormData(prev => ({ ...prev, content: prev.content + '\n' + url + '\n' }));
-                            }
-                            setShowMediaSelector(false);
-                          }}
-                        />
-                      </div>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        accept="image/*,video/*"
+                        multiple
+                        onChange={handleManualUpload}
+                      />
                     </TabsContent>
                     <TabsContent value="preview" className="mt-2">
                       <div className="min-h-[300px] p-4 border rounded-md prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-950 overflow-auto">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {formData.content || "*Nothing to preview*"}
-                        </ReactMarkdown>
+                        {formData.coverImage && (
+                          <img src={formData.coverImage} alt={formData.title} className="w-full h-auto max-h-[300px] object-contain rounded-lg mb-6" />
+                        )}
+                        {formData.title && (
+                          <h1 className="text-3xl font-bold tracking-tight mb-4">{formData.title}</h1>
+                        )}
+                        <PageContent content={formData.content || '*Nothing to preview*'} />
                       </div>
                     </TabsContent>
                   </Tabs>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="published"
-                    checked={formData.published}
-                    onCheckedChange={(checked) => {
-                      setFormData(prev => ({ ...prev, published: checked }));
-                      // If publishing immediately, disable scheduling
-                      if (checked && scheduleConfig.enabled) {
-                        setScheduleConfig({ enabled: false, scheduledFor: null });
-                      }
-                    }}
-                    disabled={scheduleConfig.enabled}
-                  />
-                  <Label htmlFor="published" className={scheduleConfig.enabled ? 'text-muted-foreground' : ''}>
-                    Publish immediately
-                    {scheduleConfig.enabled && <span className="text-xs ml-1">(disabled while scheduling)</span>}
-                  </Label>
                 </div>
 
                 {/* Schedule Picker */}
@@ -874,66 +940,78 @@ export default function AdminBlog() {
                     value={scheduleConfig}
                     onChange={(config) => {
                       setScheduleConfig(config);
-                      // If scheduling is enabled, turn off publish immediately
-                      if (config.enabled) {
-                        setFormData(prev => ({ ...prev, published: false }));
-                      }
                     }}
-                    disabled={isScheduling}
+                    disabled={!!pendingAction}
                   />
                 )}
 
-                {/* Relay Selection */}
-                <div className="space-y-3 pt-4 border-t">
-                  <div className="flex items-center gap-2 text-sm font-medium">
+                {/* Publishing Relays — collapsed under Advanced */}
+                <Collapsible>
+                  <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors pt-2">
                     <Share2 className="h-4 w-4" />
-                    Publishing Relays
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {initialPublishRelays.map((relay) => (
-                      <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
-                        <Checkbox
-                          id={`relay-${relay}`}
-                          checked={selectedRelays.includes(relay)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedRelays(prev => [...prev, relay]);
-                            } else {
-                              setSelectedRelays(prev => prev.filter(r => r !== relay));
-                            }
-                          }}
-                        />
-                        <label
-                          htmlFor={`relay-${relay}`}
-                          className="text-xs font-mono truncate cursor-pointer flex-1"
-                          title={relay}
-                        >
-                          {relay.replace('wss://', '').replace('ws://', '')}
-                        </label>
-                      </div>
-                    ))}
-                    {initialPublishRelays.length === 0 && (
-                      <p className="text-xs text-muted-foreground italic">No publishing relays configured.</p>
-                    )}
-                  </div>
-                </div>
+                    Advanced: Publishing Relays
+                    <ChevronDown className="h-4 w-4" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {initialPublishRelays.map((relay) => (
+                        <div key={relay} className="flex items-center space-x-2 bg-muted/30 p-2 rounded-md border">
+                          <Checkbox
+                            id={`relay-${relay}`}
+                            checked={selectedRelays.includes(relay)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedRelays(prev => [...prev, relay]);
+                              } else {
+                                setSelectedRelays(prev => prev.filter(r => r !== relay));
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`relay-${relay}`}
+                            className="text-xs font-mono truncate cursor-pointer flex-1"
+                            title={relay}
+                          >
+                            {relay.replace('wss://', '').replace('ws://', '')}
+                          </label>
+                        </div>
+                      ))}
+                      {initialPublishRelays.length === 0 && (
+                        <p className="text-xs text-muted-foreground italic">No publishing relays configured.</p>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
 
-                <div className="flex gap-2">
-                  <Button type="submit" disabled={isScheduling}>
-                    {isScheduling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleCancel}
+                    disabled={!!pendingAction}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => handleSubmit(true)}
+                    disabled={!!pendingAction || !formData.title.trim() || !formData.content.trim()}
+                    className={pendingAction === 'draft' ? 'btn-loading-snake' : ''}
+                  >
+                    Save Draft
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => handleSubmit(false)}
+                    disabled={!!pendingAction || !formData.title.trim() || !formData.content.trim()}
+                    className={pendingAction === 'publish' ? 'btn-loading-snake' : ''}
+                  >
                     {scheduleConfig.enabled ? (
                       <>
                         <Clock className="h-4 w-4 mr-2" />
                         {editingScheduledPostId ? 'Update Scheduled Post' : 'Schedule Post'}
                       </>
-                    ) : editingPost ? 'Update Post' : 'Create Post'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCancel}
-                  >
-                    Cancel
+                    ) : editingPost ? 'Update Post' : 'Publish Post'}
                   </Button>
                 </div>
               </form>
@@ -942,67 +1020,107 @@ export default function AdminBlog() {
         </>
       ) : (
         <>
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
+          <div className="space-y-3">
+            <div>
               <h2 className="text-2xl font-bold tracking-tight">Blog Posts</h2>
               <p className="text-muted-foreground">
                 Manage your blog posts and long-form content.
               </p>
-              <div className="mt-3 max-w-sm">
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by username..."
-                    value={usernameSearch}
-                    onChange={(e) => setUsernameSearch(e.target.value)}
-                    className="pl-8"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2 mt-3">
-                <Switch
-                  id="filter-nostr-json-blog"
-                  checked={filterByNostrJson}
-                  onCheckedChange={setFilterByNostrJson}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[200px] max-w-md">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by title or content..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
                 />
-                <Label htmlFor="filter-nostr-json-blog" className="text-sm cursor-pointer flex items-center gap-2">
-                  <Filter className="h-3 w-3" />
-                  Show only users from nostr.json
-                </Label>
+              </div>
+              <div className="flex gap-2 ml-auto">
+                <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button onClick={() => setIsCreating(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Post
+                </Button>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-              <Button onClick={() => setIsCreating(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Post
-              </Button>
+              <Switch
+                id="filter-nostr-json-blog"
+                checked={filterByNostrJson}
+                onCheckedChange={setFilterByNostrJson}
+              />
+              <Label htmlFor="filter-nostr-json-blog" className="text-sm cursor-pointer flex items-center gap-2">
+                <Filter className="h-3 w-3" />
+                Show only users from nostr.json
+              </Label>
             </div>
           </div>
 
           <div className="space-y-4">
-            {posts?.map((post) => (
+            <Tabs value={postTab} onValueChange={(v) => setPostTab(v as 'published' | 'drafts')}>
+              <TabsList className="grid w-full grid-cols-2 sm:w-fit">
+                <TabsTrigger value="published">
+                  Published ({publishedPosts.length})
+                </TabsTrigger>
+                <TabsTrigger value="drafts">
+                  Drafts ({draftPosts.length})
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {tabbedPosts.map((post) => (
               <BlogPostCard
                 key={post.id}
                 post={post}
                 user={user}
-                usernameSearch={usernameSearch}
+                searchQuery={searchQuery}
                 onEdit={handleEdit}
-                onDelete={handleDelete}
+                onDelete={setDeleteTarget}
+                relayUrl={defaultRelayUrl || ''}
+                publishRelays={initialPublishRelays}
               />
             ))}
 
-            {(!posts || posts.length === 0) && (
+            {tabbedPosts.length === 0 && (
               <Card>
                 <CardContent className="pt-6 text-center">
-                  <p className="text-muted-foreground">No blog posts yet. Create your first post!</p>
+                  <p className="text-muted-foreground">
+                    {postTab === 'published'
+                      ? 'No published posts yet. Publish a draft or create a new post!'
+                      : 'No drafts. Create a new post and save it as a draft.'}
+                  </p>
                 </CardContent>
               </Card>
             )}
           </div>
+
+          {/* Styled delete dialog */}
+          <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Delete post?</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete <strong>{deleteTarget?.title}</strong>? This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="flex-row gap-2 sm:justify-end">
+                <DialogClose asChild>
+                  <Button variant="outline">Cancel</Button>
+                </DialogClose>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteTarget && handleDelete(deleteTarget)}
+                >
+                  Delete
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>

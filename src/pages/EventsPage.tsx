@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,30 +7,25 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PageLoadingIndicator } from '@/components/PageLoadingIndicator';
-import { useQuery } from '@tanstack/react-query';
-import { useDefaultRelay } from '@/hooks/useDefaultRelay';
-import { getMasterPubkey } from '@/lib/relay';
-import { parseCalendarEventStartEnd } from '@/lib/eventTime';
+import { useCalendarEvents, type EventFilter } from '@/hooks/useCalendarEvents';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { getMasterPubkey } from '@/lib/relay';
 import Navigation from '@/components/Navigation';
-import { Calendar, MapPin, Clock, Search, Filter, RefreshCw } from 'lucide-react';
+import { Calendar, MapPin, Clock, Search, Filter, RefreshCw, Video, Calendar as CalendarIcon, LayoutGrid } from 'lucide-react';
 import { AuthorInfo } from '@/components/AuthorInfo';
+import { isEventUpcoming, isEventPast } from '@/lib/calendarEvents';
+import { CalendarGrid } from '@/components/admin/CalendarGrid';
+import { CalendarErrorBoundary } from '@/components/CalendarErrorBoundary';
 
-interface Event {
-  id: string;
-  title: string;
-  summary: string;
-  location: string;
-  start: number;
-  end?: number;
-  kind: 31922 | 31923;
-  status: string;
-  image?: string;
-  pubkey: string;
-}
+const typeFilterOptions = [
+  { value: 'all' as const, label: 'All Events' },
+  { value: 'calendar' as const, label: 'Calendar Events' },
+  { value: 'live' as const, label: 'Live/Online Events' },
+];
 
-const filterOptions = [
-  { value: 'all', label: 'All Events' },
+const timeFilterOptions = [
+  { value: 'all', label: 'All Time' },
   { value: 'upcoming', label: 'Upcoming' },
   { value: 'past', label: 'Past' },
 ];
@@ -43,57 +38,33 @@ const sortOptions = [
 
 export default function EventsPage() {
   const { config: appContext } = useAppContext();
-  const { nostr } = useDefaultRelay();
+  const { user } = useCurrentUser();
   const [searchTerm, setSearchTerm] = useState('');
-  const [filter, setFilter] = useState('upcoming');
+  const [typeFilter, setTypeFilter] = useState<EventFilter>('all');
+  const [timeFilter, setTimeFilter] = useState('all');
   const [sort, setSort] = useState('date-asc');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
 
-  const { data: events = [], isLoading, refetch } = useQuery({
-    queryKey: ['events', appContext.siteConfig?.adminRoles],
-    queryFn: async () => {
-      const signal = AbortSignal.timeout(5000);
-      const eventList = await nostr!.query([
-        { kinds: [31922, 31923], limit: 100 }
-      ], { signal });
-      
-      const adminRoles = appContext.siteConfig?.adminRoles || {};
-      const masterPubkey = getMasterPubkey();
+  const masterPubkey = getMasterPubkey();
+  // Fallback to user's pubkey if masterPubkey is undefined
+  const pubkeyToQuery = masterPubkey || user?.pubkey;
 
-      return eventList
-        .filter(event => {
-          const authorPubkey = event.pubkey.toLowerCase().trim();
-          if (authorPubkey === masterPubkey) return true;
-          return adminRoles[authorPubkey] === 'primary';
-        })
-        .map(event => {
-        const tags = event.tags || [];
-        const startTag = tags.find(([name]) => name === 'start')?.[1] || '0';
-        const endTag = tags.find(([name]) => name === 'end')?.[1];
-        const { start, end } = parseCalendarEventStartEnd(
-          event.kind,
-          startTag,
-          endTag,
-          event.created_at,
-        );
+  const { data: events = [], isLoading, refetch } = useCalendarEvents(
+    pubkeyToQuery,
+    typeFilter,
+  );
 
-        return {
-          id: event.id,
-          title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
-          summary: tags.find(([name]) => name === 'summary')?.[1] || '',
-          location: tags.find(([name]) => name === 'location')?.[1] || '',
-          start,
-          end,
-          kind: event.kind as 31922 | 31923,
-          status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
-          image: tags.find(([name]) => name === 'image')?.[1],
-          pubkey: event.pubkey,
-          created_at: event.created_at,
-        };
-      });
-    },
-    enabled: !!nostr,
-  });
+  // Debounce search input
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -107,20 +78,20 @@ export default function EventsPage() {
   // Filter and sort events
   const filteredEvents = events
     .filter(event => {
-      const matchesSearch = searchTerm === '' || 
-        event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        event.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        event.location.toLowerCase().includes(searchTerm.toLowerCase());
+      // Search filter (debounced)
+      const matchesSearch = debouncedSearchTerm === '' ||
+        event.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        event.summary.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        (event.type === 'calendar' && event.location?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())) ||
+        (event.type === 'live' && event.room.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()));
 
-      const now = Date.now() / 1000;
-      const isPast = event.end ? event.end < now : event.start < now;
-      
-      const matchesFilter = 
-        filter === 'all' ||
-        (filter === 'upcoming' && !isPast) ||
-        (filter === 'past' && isPast);
+      // Time filter
+      const matchesTimeFilter =
+        timeFilter === 'all' ||
+        (timeFilter === 'upcoming' && isEventUpcoming(event)) ||
+        (timeFilter === 'past' && isEventPast(event));
 
-      return matchesSearch && matchesFilter;
+      return matchesSearch && matchesTimeFilter;
     })
     .sort((a, b) => {
       switch (sort) {
@@ -129,16 +100,11 @@ export default function EventsPage() {
         case 'date-desc':
           return b.start - a.start;
         case 'created-desc':
-          return (b.created_at || 0) - (a.created_at || 0);
+          return b.created_at - a.created_at;
         default:
           return 0;
       }
     });
-
-  const isEventPast = (event: Event) => {
-    const now = Date.now();
-    return event.end ? event.end * 1000 < now : event.start * 1000 < now;
-  };
 
   const siteTitle = appContext.siteConfig?.title || 'Community Meetup';
   const pageTitle = `Events - ${siteTitle}`;
@@ -173,10 +139,24 @@ export default function EventsPage() {
             <p className="text-lg text-muted-foreground">
               Discover and join community meetups and events
             </p>
-            <div className="mt-4">
+            <div className="mt-4 flex gap-2">
               <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                 Refresh Events
+              </Button>
+              <Button
+                variant={viewMode === 'grid' ? 'default' : 'outline'}
+                onClick={() => setViewMode('grid')}
+              >
+                <LayoutGrid className="h-4 w-4 mr-2" />
+                Grid View
+              </Button>
+              <Button
+                variant={viewMode === 'list' ? 'default' : 'outline'}
+                onClick={() => setViewMode('list')}
+              >
+                <LayoutGrid className="h-4 w-4 mr-2" />
+                List View
               </Button>
             </div>
           </div>
@@ -184,26 +164,37 @@ export default function EventsPage() {
           {/* Filters */}
           <Card>
             <CardContent className="pt-6">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search events..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
+              <div className="flex flex-col gap-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search events..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
                 </div>
-                <div className="flex gap-2">
-                  <Select value={filter} onValueChange={setFilter}>
-                    <SelectTrigger className="w-[140px]">
+                <div className="flex flex-wrap gap-2">
+                  <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as EventFilter)}>
+                    <SelectTrigger className="w-[160px]">
                       <Filter className="h-4 w-4 mr-2" />
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {filterOptions.map(option => (
+                      {typeFilterOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={timeFilter} onValueChange={setTimeFilter}>
+                    <SelectTrigger className="w-[140px]">
+                      <Clock className="h-4 w-4 mr-2" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timeFilterOptions.map(option => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -227,65 +218,114 @@ export default function EventsPage() {
             </CardContent>
           </Card>
 
-          {/* Events Grid */}
+          {/* Events Display */}
           {filteredEvents.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredEvents.map((event) => (
-                <Card key={event.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                  {event.image && (
-                    <div className="h-48 bg-cover bg-center" style={{ backgroundImage: `url('${event.image}')` }} />
-                  )}
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <CardTitle className="text-lg line-clamp-2">{event.title}</CardTitle>
-                      <div className="flex flex-col gap-1 ml-2">
-                        <Badge variant={event.status === 'confirmed' ? 'default' : 'secondary'} className="text-xs">
-                          {event.status}
-                        </Badge>
-                        {isEventPast(event) && (
-                          <Badge variant="outline" className="text-xs">Past</Badge>
+            viewMode === 'grid' ? (
+              <CalendarErrorBoundary onRetry={refetch}>
+                <CalendarGrid
+                  events={filteredEvents}
+                  onEventClick={(event) => {
+                    // Navigate to event details
+                    window.location.href = `/event/${event.id}`;
+                  }}
+                />
+              </CalendarErrorBoundary>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredEvents.map((event) => (
+                  <Card key={event.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                    {event.image && (
+                      <div className="h-48 bg-cover bg-center" style={{ backgroundImage: `url('${event.image}')` }} />
+                    )}
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <CardTitle className="text-lg line-clamp-2">{event.title}</CardTitle>
+                        <div className="flex flex-col gap-1 ml-2">
+                          {/* Type badge */}
+                          <Badge variant={event.type === 'calendar' ? 'default' : 'secondary'} className="text-xs">
+                            {event.type === 'calendar' ? (
+                              <>
+                                <CalendarIcon className="h-3 w-3 mr-1" />
+                                Calendar
+                              </>
+                            ) : (
+                              <>
+                                <Video className="h-3 w-3 mr-1" />
+                                Live
+                              </>
+                            )}
+                          </Badge>
+                          {/* Live status badge for live events */}
+                          {event.type === 'live' && event.status === 'live' && (
+                            <Badge variant="destructive" className="text-xs animate-pulse">
+                              LIVE NOW
+                            </Badge>
+                          )}
+                          {/* Past badge */}
+                          {isEventPast(event) && (
+                            <Badge variant="outline" className="text-xs">Past</Badge>
+                          )}
+                        </div>
+                      </div>
+                      {event.summary && (
+                        <p className="text-sm text-muted-foreground line-clamp-2">{event.summary}</p>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <AuthorInfo pubkey={event.pubkey} />
+                      <div className="space-y-2 text-sm text-muted-foreground mb-4">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" />
+                          {new Date(event.start * 1000).toLocaleDateString()}
+                          {event.end && ` - ${new Date(event.end * 1000).toLocaleDateString()}`}
+                        </div>
+                        {/* Time for time-based events */}
+                        {(event.kind === 31923 || event.type === 'live') && (
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4" />
+                            {new Date(event.start * 1000).toLocaleTimeString()}
+                          </div>
+                        )}
+                        {/* Location for calendar events */}
+                        {event.type === 'calendar' && event.location && (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4" />
+                            {event.location}
+                          </div>
+                        )}
+                        {/* Room for live events */}
+                        {event.type === 'live' && (
+                          <div className="flex items-center gap-2">
+                            <Video className="h-4 w-4" />
+                            {event.room.name}
+                            {event.room.serviceUrl && (
+                              <a
+                                href={event.room.serviceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-500 hover:underline text-xs"
+                              >
+                                (Join Room)
+                              </a>
+                            )}
+                          </div>
                         )}
                       </div>
-                    </div>
-                    {event.summary && (
-                      <p className="text-sm text-muted-foreground line-clamp-2">{event.summary}</p>
-                    )}
-                  </CardHeader>
-                  <CardContent>
-                    <AuthorInfo pubkey={event.pubkey} />
-                    <div className="space-y-2 text-sm text-muted-foreground mb-4">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        {new Date(event.start * 1000).toLocaleDateString()}
-                        {event.end && ` - ${new Date(event.end * 1000).toLocaleDateString()}`}
-                      </div>
-                      {event.kind === 31923 && (
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4" />
-                          {new Date(event.start * 1000).toLocaleTimeString()}
-                        </div>
-                      )}
-                      {event.location && (
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4" />
-                          {event.location}
-                        </div>
-                      )}
-                    </div>
-                    <Button className="w-full" asChild>
-                      <Link to={`/event/${event.id}`}>View Details</Link>
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                      <Button className="w-full" asChild>
+                        <Link to={`/event/${event.id}`}>View Details</Link>
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )
           ) : (
             <Card>
               <CardContent className="py-12 text-center">
                 <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No events found</h3>
                 <p className="text-muted-foreground">
-                  {searchTerm || filter !== 'all' 
+                  {searchTerm || typeFilter !== 'all' || timeFilter !== 'all'
                     ? 'Try adjusting your search or filters.'
                     : 'No events have been created yet.'
                   }

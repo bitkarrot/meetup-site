@@ -5,8 +5,7 @@ import Navigation from '@/components/Navigation';
 import { PageLoadingIndicator } from '@/components/PageLoadingIndicator';
 import { Button } from '@/components/ui/button';
 import { Calendar, ArrowLeft } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownWithEventEmbeds } from '@/lib/MarkdownWithEventEmbeds';
 import { useSeoMeta } from '@unhead/react';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getMasterPubkey } from '@/lib/relay';
@@ -31,7 +30,7 @@ export default function BlogPostPage() {
       const masterPubkey = getMasterPubkey();
       
       const authorPubkey = event.pubkey.toLowerCase().trim();
-      if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'primary') return null;
+      if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'publisher') return null;
 
       const published = event.tags.find(([name]) => name === 'published')?.[1] !== 'false';
       if (!published) return null;
@@ -109,9 +108,7 @@ export default function BlogPostPage() {
         <AuthorInfo pubkey={post.pubkey} size="lg" showNpub={true} className="flex items-center gap-3 py-6 border-y mb-8" />
 
         <div className="prose prose-lg dark:prose-invert max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {post.content}
-          </ReactMarkdown>
+          <MarkdownWithEventEmbeds content={post.content} />
         </div>
       </article>
     </div>

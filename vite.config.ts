@@ -23,6 +23,9 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      modulePreload: false,
+    },
     plugins: [
       react(),
     ],

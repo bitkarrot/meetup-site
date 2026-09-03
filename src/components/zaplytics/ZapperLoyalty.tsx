@@ -6,6 +6,8 @@ import { Progress } from '@/components/ui/progress';
 import { Users, Heart, TrendingUp, Clock, ExternalLink } from 'lucide-react';
 import type { LoyaltyStats, ZapperLoyalty } from '@/types/zaplytics';
 import { formatSats, createNjumpProfileLink } from '@/lib/zaplytics/utils';
+import { genUserName } from '@/lib/genUserName';
+import { useAuthor } from '@/hooks/useAuthor';
 
 interface ZapperLoyaltyProps {
   data: LoyaltyStats;
@@ -162,66 +164,77 @@ export function ZapperLoyalty({ data, isLoading }: ZapperLoyaltyProps) {
           <div className="space-y-3">
             <h4 className="text-sm font-medium">Most Loyal Supporters</h4>
             <div className="space-y-3">
-              {data.topLoyalZappers.slice(0, 10).map((zapper) => {
-                const categoryInfo = getCategoryInfo(zapper.category);
-                
-                return (
-                  <div key={zapper.pubkey} className="flex items-center gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage 
-                        src={zapper.picture} 
-                        alt={zapper.name || zapper.pubkey.slice(0, 8)}
-                      />
-                      <AvatarFallback>
-                        {zapper.name ? zapper.name[0].toUpperCase() : zapper.pubkey[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="text-sm font-medium truncate">
-                          {zapper.name || `${zapper.pubkey.slice(0, 8)}...${zapper.pubkey.slice(-4)}`}
-                        </h4>
-                        <Badge 
-                          variant="secondary" 
-                          className="text-xs px-2 py-0 h-5"
-                          style={{ backgroundColor: categoryInfo.color + '20', color: categoryInfo.color }}
-                        >
-                          {categoryInfo.icon} {categoryInfo.label}
-                        </Badge>
-                      </div>
-                      
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span>{zapper.zapCount} zaps</span>
-                        <span>{formatSats(zapper.totalSats)} sats</span>
-                        {zapper.averageDaysBetweenZaps > 0 && (
-                          <span>~{formatDuration(zapper.averageDaysBetweenZaps)} between zaps</span>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="flex-shrink-0 text-right">
-                      <div className="text-lg font-bold text-primary">
-                        {formatSats(zapper.totalSats)}
-                      </div>
-                      <div className="text-xs text-muted-foreground">sats</div>
-                      
-                      <a
-                        href={createNjumpProfileLink(zapper.pubkey)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-1 transition-opacity"
-                      >
-                        View Profile <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
+              {data.topLoyalZappers.slice(0, 10).map((zapper) => (
+                <ZapperRow key={zapper.pubkey} zapper={zapper} />
+              ))}
             </div>
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Individual zapper row — fetches profile via useAuthor if
+ * name/picture are not already provided in the data.
+ */
+function ZapperRow({ zapper }: { zapper: ZapperLoyalty }) {
+  const categoryInfo = getCategoryInfo(zapper.category);
+
+  // Only fetch if we don't already have name/picture from the data
+  const { data: authorData } = useAuthor(
+    zapper.name || zapper.picture ? undefined : zapper.pubkey
+  );
+
+  const name = zapper.name || authorData?.metadata?.name || authorData?.metadata?.display_name || genUserName(zapper.pubkey);
+  const picture = zapper.picture || authorData?.metadata?.picture;
+
+  return (
+    <div className="flex items-center gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors">
+      <Avatar className="h-10 w-10">
+        <AvatarImage src={picture} alt={name} />
+        <AvatarFallback>
+          {name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+        </AvatarFallback>
+      </Avatar>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <h4 className="text-sm font-medium truncate">{name}</h4>
+          <Badge
+            variant="secondary"
+            className="text-xs px-2 py-0 h-5"
+            style={{ backgroundColor: categoryInfo.color + '20', color: categoryInfo.color }}
+          >
+            {categoryInfo.icon} {categoryInfo.label}
+          </Badge>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span>{zapper.zapCount} zaps</span>
+          <span>{formatSats(zapper.totalSats)} sats</span>
+          {zapper.averageDaysBetweenZaps > 0 && (
+            <span>~{formatDuration(zapper.averageDaysBetweenZaps)} between zaps</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-shrink-0 text-right">
+        <div className="text-lg font-bold text-primary">
+          {formatSats(zapper.totalSats)}
+        </div>
+        <div className="text-xs text-muted-foreground">sats</div>
+
+        <a
+          href={createNjumpProfileLink(zapper.pubkey)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-1 transition-opacity"
+        >
+          View Profile <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+    </div>
   );
 }

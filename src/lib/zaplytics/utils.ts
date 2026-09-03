@@ -152,35 +152,43 @@ export function groupZapsByPeriod(zaps: ParsedZap[], timeRange: TimeRange, custo
     }
   }
 
-  zaps.forEach(zap => {
-    const date = new Date(zap.receipt.created_at * 1000);
-    let periodKey: string;
-    let periodDate: Date;
-
+  // Helper: get the period key and start date for a given Date
+  const getPeriod = (date: Date): { key: string; periodDate: Date } => {
     switch (groupBy) {
       case 'hour':
-        periodKey = date.toISOString().slice(0, 13) + ':00:00.000Z'; // YYYY-MM-DDTHH
-        periodDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours());
-        break;
+        return {
+          key: date.toISOString().slice(0, 13) + ':00:00.000Z',
+          periodDate: new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()),
+        };
       case 'day':
-        periodKey = date.toISOString().slice(0, 10); // YYYY-MM-DD
-        periodDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-        break;
+        return {
+          key: date.toISOString().slice(0, 10),
+          periodDate: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
+        };
       case 'week': {
         const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - date.getDay()); // Start of week (Sunday)
-        periodKey = weekStart.toISOString().slice(0, 10);
-        periodDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
-        break;
+        weekStart.setDate(date.getDate() - date.getDay());
+        return {
+          key: weekStart.toISOString().slice(0, 10),
+          periodDate: new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()),
+        };
       }
       case 'month':
-        periodKey = date.toISOString().slice(0, 7); // YYYY-MM
-        periodDate = new Date(date.getFullYear(), date.getMonth(), 1);
-        break;
+        return {
+          key: date.toISOString().slice(0, 7),
+          periodDate: new Date(date.getFullYear(), date.getMonth(), 1),
+        };
       default:
-        periodKey = date.toISOString().slice(0, 10);
-        periodDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        return {
+          key: date.toISOString().slice(0, 10),
+          periodDate: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
+        };
     }
+  };
+
+  zaps.forEach(zap => {
+    const date = new Date(zap.receipt.created_at * 1000);
+    const { key: periodKey, periodDate } = getPeriod(date);
 
     const existing = grouped.get(periodKey) || { totalSats: 0, zapCount: 0, date: periodDate };
     existing.totalSats += zap.amount;
@@ -188,12 +196,115 @@ export function groupZapsByPeriod(zaps: ParsedZap[], timeRange: TimeRange, custo
     grouped.set(periodKey, existing);
   });
 
-  return Array.from(grouped.entries())
+  // Fill in gaps with zero-earning periods so the chart shows a continuous
+  // timeline. Without this, months/weeks/days with no zaps are simply missing
+  // from the chart, making it look like time jumped (e.g. Jan '25 → Mar '26).
+  // We determine the full range from the time range config + actual data.
+  const filled = fillPeriodGaps(grouped, groupBy, timeRange, customRange);
+
+  return Array.from(filled.entries())
     .map(([period, stats]) => ({
       period,
       ...stats,
     }))
     .sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
+/**
+ * Fill in missing periods with zero-earning entries so the chart shows
+ * a continuous timeline from the first period to the last.
+ */
+function fillPeriodGaps(
+  grouped: Map<string, { totalSats: number; zapCount: number; date: Date }>,
+  groupBy: 'hour' | 'day' | 'week' | 'month',
+  timeRange: TimeRange,
+  customRange?: CustomDateRange,
+): Map<string, { totalSats: number; zapCount: number; date: Date }> {
+  if (grouped.size === 0) return grouped;
+
+  // Determine the start and end of the range to fill
+  let rangeStart: Date;
+  let rangeEnd: Date;
+
+  if (timeRange === 'custom' && customRange) {
+    rangeStart = customRange.from;
+    rangeEnd = customRange.to;
+  } else if (timeRange === 'all') {
+    // For all-time, use the oldest and newest zap dates
+    const dates = Array.from(grouped.values()).map(g => g.date);
+    rangeStart = new Date(Math.min(...dates.map(d => d.getTime())));
+    rangeEnd = new Date(); // now
+  } else {
+    // For preset ranges (24h, 7d), use the time range boundary
+    const config = TIME_RANGES[timeRange];
+    rangeEnd = new Date();
+    rangeStart = new Date(rangeEnd.getTime() - (config.days || 7) * 24 * 60 * 60 * 1000);
+  }
+
+  // Snap rangeStart to the beginning of its period
+  const snappedStart = snapToPeriodStart(rangeStart, groupBy);
+
+  // Iterate from snappedStart to rangeEnd, creating zero entries for missing periods
+  let current = new Date(snappedStart);
+  while (current <= rangeEnd) {
+    let key: string;
+    let periodDate: Date;
+
+    switch (groupBy) {
+      case 'hour':
+        key = current.toISOString().slice(0, 13) + ':00:00.000Z';
+        periodDate = new Date(current.getFullYear(), current.getMonth(), current.getDate(), current.getHours());
+        current = new Date(current.getTime() + 60 * 60 * 1000); // +1 hour
+        break;
+      case 'day':
+        key = current.toISOString().slice(0, 10);
+        periodDate = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+        current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1); // +1 day
+        break;
+      case 'week': {
+        const weekStart = new Date(current);
+        weekStart.setDate(current.getDate() - current.getDay());
+        key = weekStart.toISOString().slice(0, 10);
+        periodDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+        current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7); // +1 week
+        break;
+      }
+      case 'month':
+        key = current.toISOString().slice(0, 7);
+        periodDate = new Date(current.getFullYear(), current.getMonth(), 1);
+        current = new Date(current.getFullYear(), current.getMonth() + 1, 1); // +1 month
+        break;
+      default:
+        key = current.toISOString().slice(0, 10);
+        periodDate = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+        current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
+    }
+
+    if (!grouped.has(key)) {
+      grouped.set(key, { totalSats: 0, zapCount: 0, date: periodDate });
+    }
+  }
+
+  return grouped;
+}
+
+/** Snap a date to the start of its period (e.g. first day of month for 'month'). */
+function snapToPeriodStart(date: Date, groupBy: 'hour' | 'day' | 'week' | 'month'): Date {
+  switch (groupBy) {
+    case 'hour':
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours());
+    case 'day':
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    case 'week': {
+      const d = new Date(date);
+      d.setDate(d.getDate() - d.getDay());
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+    case 'month':
+      return new Date(date.getFullYear(), date.getMonth(), 1);
+    default:
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
 }
 
 /**
@@ -204,6 +315,9 @@ export function groupZapsByContent(zaps: ParsedZap[]): EarningsByContent[] {
 
   zaps.forEach(zap => {
     if (!zap.zappedEvent) return;
+    // Skip entries where the zapped event wasn't actually fetched
+    // (empty content + epoch date means we only have the event ID from the e tag)
+    if (!zap.zappedEvent.content && zap.zappedEvent.created_at === 0) return;
 
     const existing = grouped.get(zap.zappedEvent.id);
     if (existing) {
@@ -322,6 +436,54 @@ export function createNjumpProfileLink(pubkey: string): string {
 export function truncateText(text: string, maxLength: number = 100): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + '...';
+}
+
+/**
+ * Extract URLs from text content.
+ * Returns an array of { url, type } where type is 'image' | 'video' | 'link'.
+ */
+export function extractUrls(text: string): { url: string; type: 'image' | 'video' | 'link'; domain: string }[] {
+  const urlRegex = /https?:\/\/[^\s<>"']+/gi;
+  const matches: { url: string; type: 'image' | 'video' | 'link'; domain: string }[] = [];
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+
+  while ((match = urlRegex.exec(text)) !== null) {
+    const url = match[0];
+    if (seen.has(url)) continue;
+    seen.add(url);
+
+    const lowerUrl = url.toLowerCase();
+    let type: 'image' | 'video' | 'link' = 'link';
+
+    // Check for image extensions
+    if (/\.(jpg|jpeg|png|gif|webp|avif|svg)(\?|#|$)/i.test(lowerUrl)) {
+      type = 'image';
+    }
+    // Check for video extensions
+    else if (/\.(mp4|webm|mov|avi|mkv)(\?|#|$)/i.test(lowerUrl)) {
+      type = 'video';
+    }
+
+    // Extract domain
+    let domain = '';
+    try {
+      domain = new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+      domain = url.substring(0, 30);
+    }
+
+    matches.push({ url, type, domain });
+  }
+
+  return matches;
+}
+
+/**
+ * Get text content with URLs removed (for cleaner preview text).
+ */
+export function stripUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s<>"']+/gi, '').trim();
 }
 
 /**
@@ -507,6 +669,7 @@ export function analyzeContentPerformance(zaps: ParsedZap[]): import('@/types/za
   // Group zaps by content
   zaps.forEach(zap => {
     if (!zap.zappedEvent) return;
+    if (!zap.zappedEvent.content && zap.zappedEvent.created_at === 0) return;
     
     const existing = contentData.get(zap.zappedEvent.id);
     if (existing) {

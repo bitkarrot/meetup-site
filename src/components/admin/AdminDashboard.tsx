@@ -6,15 +6,31 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { parseNostrEventTime } from '@/lib/eventTime';
-import type { NostrFilter } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Link } from 'react-router-dom';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useRemoteNostrJson } from '@/hooks/useRemoteNostrJson';
+import { useAuthor } from '@/hooks/useAuthor';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import MyActivityCard from '@/components/admin/MyActivityCard';
+
+function PostAuthor({ pubkey }: { pubkey: string }) {
+  const { data: author } = useAuthor(pubkey);
+  const name = author?.metadata?.name || author?.metadata?.display_name || `${pubkey.slice(0, 8)}...`;
+  return (
+    <div className="flex items-center gap-1.5">
+      <Avatar className="h-4 w-4">
+        <AvatarImage src={author?.metadata?.picture} />
+        <AvatarFallback className="text-[8px]">{name.charAt(0).toUpperCase()}</AvatarFallback>
+      </Avatar>
+      <span className="text-xs text-muted-foreground">{name}</span>
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const { nostr } = useDefaultRelay();
@@ -30,34 +46,28 @@ export default function AdminDashboard() {
     queryKey: ['admin-blog-posts', user?.pubkey],
     queryFn: async () => {
       const signal = AbortSignal.timeout(5000);
-      const filters: NostrFilter[] = [{ kinds: [30023], limit: 50 }];
+      const events = await nostr!.query([{ kinds: [30023], limit: 50 }], { signal });
 
-      if (user?.pubkey) {
-        filters.push({ kinds: [31234], authors: [user.pubkey], '#k': ['30023'], limit: 20 });
-      }
-
-      const events = await nostr!.query(filters, { signal });
-
-      // Defensive filter to ensure only kind 30023 or kind 31234 with k=30023 are included
-      return events.filter(event =>
-        event.kind === 30023 ||
-        (event.kind === 31234 && event.tags.some(([name, value]) => name === 'k' && value === '30023'))
-      );
+      // Sort by created_at descending (newest first)
+      return events.sort((a, b) => b.created_at - a.created_at);
     },
     enabled: !!nostr,
   });
 
-  // Fetch events (kind 31922/31923 - Calendar events)
+  // Fetch events (kind 31922/31923 - Calendar events, 30313 - Live events)
   const { data: events, isLoading: isLoadingEvents, error: eventError } = useQuery({
     queryKey: ['admin-events'],
     queryFn: async () => {
-      const signal = AbortSignal.timeout(5000);
-      const events = await nostr!.query([
-        { kinds: [31922, 31923], limit: 50 }
+      if (!nostr) return [];
+      const signal = AbortSignal.timeout(10000);
+      const events = await nostr.query([
+        { kinds: [31922, 31923, 30313], limit: 50 }
       ], { signal });
       return events;
     },
     enabled: !!nostr,
+    refetchOnMount: true,
+    staleTime: 0,
   });
 
   const handleRefresh = async () => {
@@ -81,7 +91,8 @@ export default function AdminDashboard() {
     })
     : blogPosts;
 
-  const filteredEvents = filterByNostrJson && remoteNostrJson?.names
+  // Always filter events to whitelisted pubkeys
+  const filteredEvents = remoteNostrJson?.names
     ? events?.filter(event => {
       const normalizedPubkey = event.pubkey.toLowerCase().trim();
       return Object.values(remoteNostrJson.names).some(
@@ -89,6 +100,25 @@ export default function AdminDashboard() {
       );
     })
     : events;
+
+  // Filter to upcoming events only
+  const now = Date.now() / 1000;
+  const getStart = (event: { kind: number; tags: string[][] }) => {
+    const tags = event.tags || [];
+    const isLiveEvent = event.kind === 30313;
+    const startTag = tags.find(([name]) => name === (isLiveEvent ? 'starts' : 'start'))?.[1];
+    if (!startTag) return undefined;
+    return isLiveEvent ? Number(startTag) : parseNostrEventTime(startTag);
+  };
+  const upcomingEvents = filteredEvents?.filter(event => {
+    const startTime = getStart(event);
+    if (startTime === undefined) return false;
+    return startTime > now;
+  }).sort((a, b) => {
+    const aStart = getStart(a) ?? 0;
+    const bStart = getStart(b) ?? 0;
+    return aStart - bStart;
+  });
 
   const stats = [
     {
@@ -98,8 +128,8 @@ export default function AdminDashboard() {
       description: 'Published articles & drafts',
     },
     {
-      title: 'Events',
-      value: filteredEvents?.length || 0,
+      title: 'Upcoming Events',
+      value: upcomingEvents?.length || 0,
       icon: Calendar,
       description: 'Scheduled meetups',
     },
@@ -169,25 +199,14 @@ export default function AdminDashboard() {
         </Alert>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="space-y-3">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
           <p className="text-muted-foreground">
             Welcome to your site admin panel. Here's an overview of your content.
           </p>
-          <div className="flex items-center gap-2 mt-3">
-            <Switch
-              id="filter-nostr-json-dashboard"
-              checked={filterByNostrJson}
-              onCheckedChange={setFilterByNostrJson}
-            />
-            <Label htmlFor="filter-nostr-json-dashboard" className="text-sm cursor-pointer flex items-center gap-2">
-              <Filter className="h-3 w-3" />
-              Show only users from nostr.json
-            </Label>
-          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex justify-end gap-2">
           {isDismissed && (
             <Button
               variant="outline"
@@ -210,10 +229,21 @@ export default function AdminDashboard() {
             Refresh
           </Button>
         </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            id="filter-nostr-json-dashboard"
+            checked={filterByNostrJson}
+            onCheckedChange={setFilterByNostrJson}
+          />
+          <Label htmlFor="filter-nostr-json-dashboard" className="text-sm cursor-pointer flex items-center gap-2">
+            <Filter className="h-3 w-3" />
+            Show only users from nostr.json
+          </Label>
+        </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         {stats.map((stat) => (
           <Card key={stat.title}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -230,6 +260,11 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
         ))}
+        {/* My Activity — visible to all admin users (primary & secondary).
+            Uses the relay dashboard API (/dashboard/my-stats), not a
+            standard Nostr author query, so it works for anyone with a
+            dashboard session. */}
+        <MyActivityCard />
       </div>
 
       {/* Recent Content */}
@@ -241,39 +276,29 @@ export default function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {filteredBlogPosts?.slice(0, 5).map((post) => {
-                const tags = post.tags || [];
-                let title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
-                let published = tags.find(([name]) => name === 'published')?.[1] === 'true' || !tags.find(([name]) => name === 'published');
+              {filteredBlogPosts
+                ?.filter(post => post.kind === 30023)
+                .slice(0, 5)
+                .map((post) => {
+                  const tags = post.tags || [];
+                  const title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled';
 
-                if (post.kind === 31234) {
-                  published = false;
-                  title = '[Private Draft]';
-                  // Note: We're not decrypting here for simplicity in the dashboard list
-                  // But we show that it is a private draft
-                }
-
-                return (
-                  <div key={post.id} className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium leading-none">
-                        {title}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(post.created_at * 1000).toLocaleDateString()}
-                      </p>
+                  return (
+                    <div key={post.id} className="flex items-center justify-between gap-3">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <p className="text-sm font-bold leading-snug">
+                          {title}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <PostAuthor pubkey={post.pubkey} />
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(post.created_at * 1000).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        Kind {post.kind}
-                      </Badge>
-                      <Badge variant={published ? 'default' : 'secondary'}>
-                        {published ? 'Published' : 'Draft'}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
               {(!filteredBlogPosts || filteredBlogPosts.length === 0) && (
                 <p className="text-sm text-muted-foreground">No blog posts yet.</p>
               )}
@@ -281,22 +306,24 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* Recent Events */}
+        {/* Upcoming Events */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Events</CardTitle>
+            <CardTitle>Upcoming Events</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {filteredEvents?.slice(0, 5).map((event) => {
+              {upcomingEvents?.slice(0, 5).map((event) => {
                 const tags = event.tags || [];
+                const isLiveEvent = event.kind === 30313;
                 const title = tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event';
-                const startTag = tags.find(([name]) => name === 'start')?.[1];
-                const status = tags.find(([name]) => name === 'status')?.[1] || 'confirmed';
+                // 30313 uses 'starts', 31922/31923 uses 'start'
+                const startTag = tags.find(([name]) => name === (isLiveEvent ? 'starts' : 'start'))?.[1];
+                const status = tags.find(([name]) => name === 'status')?.[1] || (isLiveEvent ? 'planned' : 'confirmed');
 
                 let dateDisplay = 'No date';
                 if (startTag) {
-                  const parsedStart = parseNostrEventTime(startTag);
+                  const parsedStart = isLiveEvent ? Number(startTag) : parseNostrEventTime(startTag);
                   if (parsedStart) {
                     dateDisplay = new Date(parsedStart * 1000).toLocaleDateString();
                   }
@@ -312,14 +339,14 @@ export default function AdminDashboard() {
                         {dateDisplay}
                       </p>
                     </div>
-                    <Badge variant={status === 'confirmed' ? 'default' : 'secondary'}>
+                    <Badge variant={status === 'confirmed' || status === 'planned' ? 'default' : 'secondary'}>
                       {status}
                     </Badge>
                   </div>
                 );
               })}
-              {(!filteredEvents || filteredEvents.length === 0) && (
-                <p className="text-sm text-muted-foreground">No events yet.</p>
+              {(!upcomingEvents || upcomingEvents.length === 0) && (
+                <p className="text-sm text-muted-foreground">No upcoming events.</p>
               )}
             </div>
           </CardContent>

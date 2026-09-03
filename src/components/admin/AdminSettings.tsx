@@ -1,246 +1,36 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAppContext } from '@/hooks/useAppContext';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { getDefaultRelayUrl, getSiteConfigDTag } from '@/lib/relay';
-import { Save, Plus, Trash2, GripVertical, RefreshCw, ShieldAlert, Eye, AlertCircle } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Save, RotateCcw, RefreshCw, ShieldAlert, Eye, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import { useAdminAuth } from '@/hooks/useRemoteNostrJson';
-import { AlertTriangle } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
   DragEndEvent,
 } from '@dnd-kit/core';
 import {
   arrayMove,
   SortableContext,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
-  useSortable,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
-interface NavigationItem {
-  id: string;
-  name: string;
-  href: string;
-  isSubmenu: boolean;
-  isLabelOnly?: boolean;
-  parentId?: string;
-}
-
-interface SiteConfig {
-  title: string;
-  logo: string;
-  favicon: string;
-  ogImage: string;
-  heroTitle: string;
-  heroSubtitle: string;
-  heroBackground: string;
-  heroButtons: Array<{
-    label: string;
-    href: string;
-    variant?: 'default' | 'outline';
-  }>;
-  showEvents: boolean;
-  showBlog: boolean;
-  feedNpubs: string[];
-  feedReadFromPublishRelays: boolean;
-  maxEvents: number;
-  maxBlogPosts: number;
-  defaultRelay: string;
-  publishRelays: string[];
-  adminRoles: Record<string, 'primary' | 'secondary'>;
-  tweakcnThemeUrl?: string;
-  sectionOrder?: string[];
-  nip19Gateway?: string;
-  readOnlyAdminAccess: boolean;
-  updatedAt?: number;
-}
-
-const TWEAKCN_THEMES = [
-  { name: 'Default', url: 'none' },
-  { name: 'Tangerine', url: 'https://tweakcn.com/r/themes/tangerine.json' },
-  { name: 'Amethyst Haze', url: 'https://tweakcn.com/r/themes/amethyst-haze.json' },
-  { name: 'Midnight Bloom', url: 'https://tweakcn.com/r/themes/midnight-bloom.json' },
-  { name: 'Clean Slate', url: 'https://tweakcn.com/r/themes/clean-slate.json' },
-  { name: 'Bold Tech', url: 'https://tweakcn.com/r/themes/bold-tech.json' },
-];
-
-interface SortableNavItemProps {
-  item: NavigationItem;
-  navigation: NavigationItem[];
-  onUpdate: (id: string, updates: Partial<NavigationItem>) => void;
-  onRemove: (id: string) => void;
-  disabled?: boolean;
-}
-
-function SortableNavItem({ item, navigation, onUpdate, onRemove, disabled }: SortableNavItemProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: item.id, disabled });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  const parentItems = navigation.filter(n => !n.parentId && n.id !== item.id);
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn(
-        "flex flex-col gap-2 p-3 border rounded-md bg-card",
-        item.parentId && "ml-8 border-l-4 border-l-primary/30"
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
-          <GripVertical className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2">
-          <Input
-            value={item.name}
-            onChange={(e) => onUpdate(item.id, { name: e.target.value })}
-            placeholder="Name"
-            disabled={disabled}
-          />
-          {!item.isLabelOnly ? (
-            <Input
-              value={item.href}
-              onChange={(e) => onUpdate(item.id, { href: e.target.value })}
-              placeholder="/path"
-              disabled={disabled}
-            />
-          ) : (
-            <div className="flex items-center px-3 text-sm text-muted-foreground italic border rounded-md bg-muted/50 h-10">
-              No link (Label Only)
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-4 px-2">
-          {!item.parentId && (
-            <div className="flex items-center gap-2">
-              <Label htmlFor={`label-only-${item.id}`} className="text-xs text-muted-foreground whitespace-nowrap">Label Only</Label>
-              <Switch
-                id={`label-only-${item.id}`}
-                checked={item.isLabelOnly}
-                onCheckedChange={(checked) => onUpdate(item.id, { isLabelOnly: checked })}
-                disabled={disabled}
-              />
-            </div>
-          )}
-          {!item.parentId && (
-            <Select
-              value={item.parentId || "none"}
-              onValueChange={(val) => onUpdate(item.id, { parentId: val === "none" ? undefined : val })}
-              disabled={disabled}
-            >
-              <SelectTrigger className="w-[140px] h-9">
-                <SelectValue placeholder="No parent" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Main Menu</SelectItem>
-                {parentItems.map(p => (
-                  <SelectItem key={p.id} value={p.id}>Child of {p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {item.parentId && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onUpdate(item.id, { parentId: undefined })}
-              title="Move to root"
-            >
-              <Plus className="h-4 w-4 rotate-45" />
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onRemove(item.id)}
-            disabled={disabled}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface SortableSectionProps {
-  id: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}
-
-function SortableSection({ id, title, description, children }: SortableSectionProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : 'auto',
-    position: 'relative' as const,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style} className={cn(isDragging && "opacity-50")}>
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>{title}</CardTitle>
-            {description && <CardDescription>{description}</CardDescription>}
-          </div>
-          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-2 -mr-2 rounded-md hover:bg-muted text-muted-foreground transition-colors">
-            <GripVertical className="h-5 w-5" />
-          </div>
-        </CardHeader>
-        {children}
-      </Card>
-    </div>
-  );
-}
+import { type SiteConfig, type NavigationItem, DEFAULT_SITE_CONFIG, DEFAULT_NAVIGATION, DEFAULT_HERO_BUTTONS, ALL_SETTINGS_SECTION_IDS, BUILTIN_HOMEPAGE_SECTION_IDS } from './settings/types';
+import { useSettingsSensors } from './settings/useSettingsSensors';
+import { useHomepagePages } from './settings/useHomepagePages';
+import { BasicInfoSection } from './settings/BasicInfoSection';
+import { StylingSection } from './settings/StylingSection';
+import { HeroSection } from './settings/HeroSection';
+import { ContentDisplaySection } from './settings/ContentDisplaySection';
+import { NavigationSection } from './settings/NavigationSection';
+import { HomepageLayoutSection } from './settings/HomepageLayoutSection';
+import { SettingsPresets, type Preset } from './settings/SettingsPresets';
+import { HomepagePreviewDialog } from './settings/HomepagePreviewDialog';
 
 export default function AdminSettings() {
   const { config, updateConfig } = useAppContext();
@@ -252,38 +42,23 @@ export default function AdminSettings() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [previewThemeUrl, setPreviewThemeUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const { isAdmin, isMaster: isMasterUser, isLoading: authLoading, masterPubkey } = useAdminAuth(user?.pubkey);
 
+  // Fetch kind 34128 pages flagged as homepage sections.
+  const { data: homepagePages = [] } = useHomepagePages({
+    staleTime: 30000,
+    adminRoles: config.siteConfig?.adminRoles,
+  });
+
   const [navigation, setNavigation] = useState<NavigationItem[]>(() =>
-    config.navigation ?? [
-      { id: '2', name: 'Events', href: '/events', isSubmenu: false },
-      { id: '3', name: 'Blog', href: '/blog', isSubmenu: false },
-      { id: '6', name: 'Feed', href: '/feed', isSubmenu: false },
-      { id: '4', name: 'About', href: '/about', isSubmenu: false },
-      { id: '5', name: 'Contact', href: '/contact', isSubmenu: false },
-    ]
+    config.navigation ?? DEFAULT_NAVIGATION
   );
 
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => ({
-    title: config.siteConfig?.title ?? 'My Meetup Site',
-    logo: config.siteConfig?.logo ?? '',
-    favicon: config.siteConfig?.favicon ?? '',
-    ogImage: config.siteConfig?.ogImage ?? '',
-    heroTitle: config.siteConfig?.heroTitle ?? 'Welcome to Our Community',
-    heroSubtitle: config.siteConfig?.heroSubtitle ?? 'Join us for amazing meetups and events',
-    heroBackground: config.siteConfig?.heroBackground ?? 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop',
-    heroButtons: config.siteConfig?.heroButtons ?? [
-      { label: 'View Events', href: '/events', variant: 'default' },
-      { label: 'Read Blog', href: '/blog', variant: 'outline' },
-    ],
-    showEvents: config.siteConfig?.showEvents ?? true,
-    showBlog: config.siteConfig?.showBlog ?? true,
-    feedNpubs: config.siteConfig?.feedNpubs ?? [],
-    feedReadFromPublishRelays: config.siteConfig?.feedReadFromPublishRelays ?? false,
-    maxEvents: config.siteConfig?.maxEvents ?? 6,
-    maxBlogPosts: config.siteConfig?.maxBlogPosts ?? 3,
+    ...DEFAULT_SITE_CONFIG,
+    ...config.siteConfig,
     defaultRelay: config.siteConfig?.defaultRelay ?? getDefaultRelayUrl(),
     publishRelays: config.siteConfig?.publishRelays ?? [
       getDefaultRelayUrl(),
@@ -291,48 +66,80 @@ export default function AdminSettings() {
       'wss://relay.primal.net',
       'wss://nos.lol'
     ].filter(Boolean),
-    adminRoles: config.siteConfig?.adminRoles ?? {},
-    tweakcnThemeUrl: config.siteConfig?.tweakcnThemeUrl ?? '',
-    nip19Gateway: config.siteConfig?.nip19Gateway ?? 'https://nostr.at',
-    sectionOrder: config.siteConfig?.sectionOrder ?? ['navigation', 'basic', 'styling', 'hero', 'content'],
-    readOnlyAdminAccess: config.siteConfig?.readOnlyAdminAccess ?? false,
+    heroButtons: config.siteConfig?.heroButtons ?? DEFAULT_HERO_BUTTONS,
+    sectionOrder: config.siteConfig?.sectionOrder ?? [...ALL_SETTINGS_SECTION_IDS],
+    homepageSectionOrder: config.siteConfig?.homepageSectionOrder ?? [...BUILTIN_HOMEPAGE_SECTION_IDS],
   }));
 
-  const isDirty = useMemo(() => {
-    const originalConfig = config.siteConfig || {};
-    const hasConfigChanged =
-      siteConfig.title !== (originalConfig.title ?? 'My Meetup Site') ||
-      siteConfig.logo !== (originalConfig.logo ?? '') ||
-      siteConfig.favicon !== (originalConfig.favicon ?? '') ||
-      siteConfig.ogImage !== (originalConfig.ogImage ?? '') ||
-      siteConfig.heroTitle !== (originalConfig.heroTitle ?? 'Welcome to Our Community') ||
-      siteConfig.heroSubtitle !== (originalConfig.heroSubtitle ?? 'Join us for amazing meetups and events') ||
-      siteConfig.heroBackground !== (originalConfig.heroBackground ?? 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop') ||
-      JSON.stringify(siteConfig.heroButtons) !== JSON.stringify(originalConfig.heroButtons ?? [
-        { label: 'View Events', href: '/events', variant: 'default' },
-        { label: 'Read Blog', href: '/blog', variant: 'outline' },
-      ]) ||
-      siteConfig.showEvents !== (originalConfig.showEvents ?? true) ||
-      siteConfig.showBlog !== (originalConfig.showBlog ?? true) ||
-      JSON.stringify(siteConfig.feedNpubs) !== JSON.stringify(originalConfig.feedNpubs ?? []) ||
-      siteConfig.feedReadFromPublishRelays !== (originalConfig.feedReadFromPublishRelays ?? false) ||
-      siteConfig.maxEvents !== (originalConfig.maxEvents ?? 6) ||
-      siteConfig.maxBlogPosts !== (originalConfig.maxBlogPosts ?? 3) ||
-      siteConfig.defaultRelay !== (originalConfig.defaultRelay ?? getDefaultRelayUrl()) ||
-      siteConfig.tweakcnThemeUrl !== (originalConfig.tweakcnThemeUrl ?? '') ||
-      siteConfig.nip19Gateway !== (originalConfig.nip19Gateway ?? 'https://nostr.at') ||
-      JSON.stringify(siteConfig.sectionOrder) !== JSON.stringify(originalConfig.sectionOrder ?? ['navigation', 'basic', 'styling', 'hero', 'content']);
+  // Stable callback for section components to update siteConfig fields
+  const updateSiteConfig = useCallback((updates: Partial<SiteConfig>) => {
+    setSiteConfig(prev => ({ ...prev, ...updates }));
+  }, []);
 
-    const hasNavChanged = JSON.stringify(navigation) !== JSON.stringify(config.navigation || [
-      { id: '2', name: 'Events', href: '/events', isSubmenu: false },
-      { id: '3', name: 'Blog', href: '/blog', isSubmenu: false },
-      { id: '6', name: 'Feed', href: '/feed', isSubmenu: false },
-      { id: '4', name: 'About', href: '/about', isSubmenu: false },
-      { id: '5', name: 'Contact', href: '/contact', isSubmenu: false },
-    ]);
+  // Reconcile homepageSectionOrder: when homepage pages are fetched, append any
+  // new page section IDs that aren't yet in the order. Runs only when the set
+  // of homepage page paths actually changes (not on every re-render).
+  const homepagePagePaths = useMemo(
+    () => homepagePages.map(p => p.path).sort().join(','),
+    [homepagePages]
+  );
+  useEffect(() => {
+    const pageIds = homepagePages.map(p => `page:${p.path}`);
+    setSiteConfig(prev => {
+      const order = prev.homepageSectionOrder ?? [...BUILTIN_HOMEPAGE_SECTION_IDS];
+      const newIds = pageIds.filter(id => !order.includes(id));
+      if (newIds.length === 0) return prev; // no change — avoid unnecessary re-render
+      return { ...prev, homepageSectionOrder: [...order, ...newIds] };
+    });
+  }, [homepagePagePaths]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally only depend on the serialized paths string
 
-    return hasConfigChanged || hasNavChanged;
-  }, [siteConfig, navigation, config]);
+  // Per-section dirty checks — each only recomputes when its own fields change
+  const dirtyBasic = useMemo(() => {
+    const o = config.siteConfig || {};
+    return siteConfig.title !== (o.title ?? DEFAULT_SITE_CONFIG.title) ||
+      siteConfig.logo !== (o.logo ?? DEFAULT_SITE_CONFIG.logo) ||
+      siteConfig.favicon !== (o.favicon ?? DEFAULT_SITE_CONFIG.favicon) ||
+      siteConfig.ogImage !== (o.ogImage ?? DEFAULT_SITE_CONFIG.ogImage) ||
+      siteConfig.nip19Gateway !== (o.nip19Gateway ?? DEFAULT_SITE_CONFIG.nip19Gateway);
+  }, [siteConfig.title, siteConfig.logo, siteConfig.favicon, siteConfig.ogImage, siteConfig.nip19Gateway, config.siteConfig]);
+
+  const dirtyStyling = useMemo(() => {
+    const o = config.siteConfig || {};
+    return siteConfig.tweakcnThemeUrl !== (o.tweakcnThemeUrl ?? DEFAULT_SITE_CONFIG.tweakcnThemeUrl);
+  }, [siteConfig.tweakcnThemeUrl, config.siteConfig]);
+
+  const dirtyHero = useMemo(() => {
+    const o = config.siteConfig || {};
+    return siteConfig.heroTitle !== (o.heroTitle ?? DEFAULT_SITE_CONFIG.heroTitle) ||
+      siteConfig.heroSubtitle !== (o.heroSubtitle ?? DEFAULT_SITE_CONFIG.heroSubtitle) ||
+      siteConfig.heroBackground !== (o.heroBackground ?? DEFAULT_SITE_CONFIG.heroBackground) ||
+      siteConfig.heroBackgroundType !== (o.heroBackgroundType ?? DEFAULT_SITE_CONFIG.heroBackgroundType) ||
+      siteConfig.heroBackgroundColor !== (o.heroBackgroundColor ?? DEFAULT_SITE_CONFIG.heroBackgroundColor) ||
+      siteConfig.heroTextColor !== (o.heroTextColor ?? DEFAULT_SITE_CONFIG.heroTextColor) ||
+      siteConfig.heroBanner !== (o.heroBanner ?? DEFAULT_SITE_CONFIG.heroBanner);
+  }, [siteConfig.heroTitle, siteConfig.heroSubtitle, siteConfig.heroBackground, siteConfig.heroBackgroundType, siteConfig.heroBackgroundColor, siteConfig.heroTextColor, siteConfig.heroBanner, config.siteConfig]);
+
+  const dirtyContent = useMemo(() => {
+    const o = config.siteConfig || {};
+    return siteConfig.showEvents !== (o.showEvents ?? DEFAULT_SITE_CONFIG.showEvents) ||
+      siteConfig.showBlog !== (o.showBlog ?? DEFAULT_SITE_CONFIG.showBlog) ||
+      siteConfig.showFeed !== (o.showFeed ?? DEFAULT_SITE_CONFIG.showFeed) ||
+      siteConfig.maxEvents !== (o.maxEvents ?? DEFAULT_SITE_CONFIG.maxEvents) ||
+      siteConfig.maxBlogPosts !== (o.maxBlogPosts ?? DEFAULT_SITE_CONFIG.maxBlogPosts) ||
+      siteConfig.maxFeedNotes !== (o.maxFeedNotes ?? DEFAULT_SITE_CONFIG.maxFeedNotes) ||
+      JSON.stringify(siteConfig.heroButtons) !== JSON.stringify(o.heroButtons ?? DEFAULT_HERO_BUTTONS);
+  }, [siteConfig.showEvents, siteConfig.showBlog, siteConfig.showFeed, siteConfig.maxEvents, siteConfig.maxBlogPosts, siteConfig.maxFeedNotes, siteConfig.heroButtons, config.siteConfig]);
+
+  const dirtyNavigation = useMemo(() => {
+    return JSON.stringify(navigation) !== JSON.stringify(config.navigation ?? DEFAULT_NAVIGATION);
+  }, [navigation, config.navigation]);
+
+  const dirtyHomepage = useMemo(() => {
+    const o = config.siteConfig || {};
+    return JSON.stringify(siteConfig.homepageSectionOrder) !== JSON.stringify(o.homepageSectionOrder ?? [...BUILTIN_HOMEPAGE_SECTION_IDS]);
+  }, [siteConfig.homepageSectionOrder, config.siteConfig]);
+
+  const isDirty = dirtyBasic || dirtyStyling || dirtyHero || dirtyContent || dirtyNavigation || dirtyHomepage;
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -345,22 +152,18 @@ export default function AdminSettings() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
-  // Handle theme preview
+  // Apply TweakCN theme live — themes are applied instantly when selected,
+  // and saved permanently when the user clicks Save Changes.
   useEffect(() => {
-    const themeToApply = previewThemeUrl ?? siteConfig.tweakcnThemeUrl;
-
-    if (!themeToApply) {
-      const existingStyle = document.getElementById('tweakcn-theme');
-      if (existingStyle && !previewThemeUrl) {
-        // Only remove if we're not in preview mode and there's no saved theme
-        existingStyle.remove();
-      }
+    const themeUrl = siteConfig.tweakcnThemeUrl;
+    if (!themeUrl) {
+      document.getElementById('tweakcn-theme')?.remove();
       return;
     }
 
     const fetchTheme = async () => {
       try {
-        const response = await fetch(themeToApply);
+        const response = await fetch(themeUrl);
         if (!response.ok) throw new Error(`Failed to fetch theme: ${response.statusText}`);
         const themeData = await response.json();
         const vars = themeData.cssVars || themeData;
@@ -390,26 +193,14 @@ export default function AdminSettings() {
         }
         styleTag.textContent = cssVars;
       } catch (error) {
-        console.error('Error applying theme preview:', error);
+        console.error('Error applying theme:', error);
       }
     };
 
     fetchTheme();
-
-    // Cleanup preview on unmount if it was just a preview
-    return () => {
-      if (previewThemeUrl) {
-        // Re-apply original theme from config if we were previewing
-        const originalTheme = siteConfig.tweakcnThemeUrl;
-        if (!originalTheme) {
-          document.getElementById('tweakcn-theme')?.remove();
-        }
-      }
-    };
-  }, [previewThemeUrl, siteConfig.tweakcnThemeUrl]);
+  }, [siteConfig.tweakcnThemeUrl]);
 
   // Sync state with config when it changes (e.g. after loading from localStorage or Relay)
-  // but only if we're not currently saving or refreshing to avoid overwriting user input
   useEffect(() => {
     if (isSaving || isRefreshing) {
       return;
@@ -419,7 +210,6 @@ export default function AdminSettings() {
       setSiteConfig(prev => ({
         ...prev,
         ...config.siteConfig,
-        // Ensure arrays are handled correctly if partial
         publishRelays: config.siteConfig?.publishRelays ?? prev.publishRelays,
         adminRoles: config.siteConfig?.adminRoles ?? prev.adminRoles,
       }) as SiteConfig);
@@ -429,31 +219,17 @@ export default function AdminSettings() {
     }
   }, [config.siteConfig, config.navigation, isSaving, isRefreshing]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
+  const sensors = useSettingsSensors();
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-
-    if (over && active.id !== over.id) {
-      setNavigation((items) => {
-        const oldIndex = items.findIndex((i) => i.id === active.id);
-        const newIndex = items.findIndex((i) => i.id === over.id);
-        return arrayMove(items, oldIndex, newIndex);
-      });
-    }
-  };
-
-  const handleSectionDragEnd = (event: DragEndEvent) => {
+  const handleSectionDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
       setSiteConfig((prev) => {
-        const order = prev.sectionOrder || ['navigation', 'basic', 'styling', 'hero', 'content'];
+        const saved = prev.sectionOrder || ALL_SETTINGS_SECTION_IDS;
+        const known = new Set(ALL_SETTINGS_SECTION_IDS);
+        const present = new Set(saved);
+        const order = [...saved.filter(id => known.has(id)), ...ALL_SETTINGS_SECTION_IDS.filter(id => !present.has(id))];
         const oldIndex = order.indexOf(active.id as string);
         const newIndex = order.indexOf(over.id as string);
         return {
@@ -462,7 +238,43 @@ export default function AdminSettings() {
         };
       });
     }
-  };
+  }, []);
+
+  const handleApplyPreset = useCallback((preset: Preset) => {
+    if (preset.siteConfig) {
+      setSiteConfig(prev => ({ ...prev, ...preset.siteConfig }));
+    }
+    if (preset.navigation) {
+      setNavigation(preset.navigation);
+    }
+    toast({
+      title: "Template Applied",
+      description: `${preset.name} template loaded. Review and save to persist.`,
+    });
+  }, [toast]);
+
+  // Reconcile sectionOrder: ensure all built-in sections are present.
+  // Older saved configs may not include 'homepage' (added after initial release).
+  const sectionOrder = useMemo(() => {
+    const saved = siteConfig.sectionOrder || ALL_SETTINGS_SECTION_IDS;
+    const known = new Set(ALL_SETTINGS_SECTION_IDS);
+    const present = new Set(saved);
+    return [...saved.filter(id => known.has(id)), ...ALL_SETTINGS_SECTION_IDS.filter(id => !present.has(id))];
+  }, [siteConfig.sectionOrder]);
+
+  // Reconcile homepageSectionOrder for display: filter out stale page IDs
+  // (pages that no longer exist) while keeping the saved order.
+  const homepagePageIds = useMemo(
+    () => new Set(homepagePages.map(p => `page:${p.path}`)),
+    [homepagePages]
+  );
+  const reconciledHomepageOrder = useMemo(() => {
+    const order = siteConfig.homepageSectionOrder ?? [...BUILTIN_HOMEPAGE_SECTION_IDS];
+    const builtinIds = new Set(BUILTIN_HOMEPAGE_SECTION_IDS);
+    return order.filter(id => builtinIds.has(id) || homepagePageIds.has(id));
+  }, [siteConfig.homepageSectionOrder, homepagePageIds]);
+
+  const disabled = !isMasterUser;
 
   const canView = isMasterUser || (isAdmin && (siteConfig.readOnlyAdminAccess || config.siteConfig?.readOnlyAdminAccess));
 
@@ -518,6 +330,10 @@ export default function AdminSettings() {
           heroTitle: 'hero_title',
           heroSubtitle: 'hero_subtitle',
           heroBackground: 'hero_background',
+          heroBackgroundType: 'hero_background_type',
+          heroBackgroundColor: 'hero_background_color',
+          heroTextColor: 'hero_text_color',
+          heroBanner: 'hero_banner',
           defaultRelay: 'default_relay',
           tweakcnThemeUrl: 'tweakcn_theme_url',
           nip19Gateway: 'nip19_gateway',
@@ -538,21 +354,29 @@ export default function AdminSettings() {
         const eventUpdatedAt = updatedAtTag ? parseInt(updatedAtTag) : event.created_at;
         loadedConfig.updatedAt = eventUpdatedAt;
 
-        // Handle booleans and numbers separately
         const showEvents = eventTags.find(([name]) => name === 'show_events')?.[1];
         if (showEvents !== undefined) loadedConfig.showEvents = showEvents === 'true';
 
         const showBlog = eventTags.find(([name]) => name === 'show_blog')?.[1];
         if (showBlog !== undefined) loadedConfig.showBlog = showBlog === 'true';
 
+        const showFeed = eventTags.find(([name]) => name === 'show_feed')?.[1];
+        if (showFeed !== undefined) loadedConfig.showFeed = showFeed === 'true';
+
         const readOnlyAdminAccess = eventTags.find(([name]) => name === 'read_only_admin_access')?.[1];
         if (readOnlyAdminAccess !== undefined) loadedConfig.readOnlyAdminAccess = readOnlyAdminAccess === 'true';
+
+        const autoHarvest24h = eventTags.find(([name]) => name === 'auto_harvest_24h')?.[1];
+        if (autoHarvest24h !== undefined) loadedConfig.autoHarvest24h = autoHarvest24h === 'true';
 
         const maxEvents = eventTags.find(([name]) => name === 'max_events')?.[1];
         if (maxEvents !== undefined) loadedConfig.maxEvents = parseInt(maxEvents);
 
         const maxBlogPosts = eventTags.find(([name]) => name === 'max_blog_posts')?.[1];
         if (maxBlogPosts !== undefined) loadedConfig.maxBlogPosts = parseInt(maxBlogPosts);
+
+        const maxFeedNotes = eventTags.find(([name]) => name === 'max_feed_notes')?.[1];
+        if (maxFeedNotes !== undefined) loadedConfig.maxFeedNotes = parseInt(maxFeedNotes);
 
         const relaysTag = eventTags.find(([name]) => name === 'publish_relays')?.[1];
         if (relaysTag) {
@@ -568,7 +392,15 @@ export default function AdminSettings() {
         if (adminRolesTag) {
           try {
             const parsed = JSON.parse(adminRolesTag);
-            if (parsed && typeof parsed === 'object') loadedConfig.adminRoles = parsed;
+            if (parsed && typeof parsed === 'object') {
+              const migrated: Record<string, 'publisher' | 'user'> = {};
+              for (const [pk, role] of Object.entries(parsed)) {
+                if (role === 'primary') migrated[pk] = 'publisher';
+                else if (role === 'secondary') migrated[pk] = 'user';
+                else migrated[pk] = role as 'publisher' | 'user';
+              }
+              loadedConfig.adminRoles = migrated;
+            }
           } catch (e) {
             console.error('Failed to parse admin_roles tag', e);
           }
@@ -584,8 +416,16 @@ export default function AdminSettings() {
           }
         }
 
-        // Check if relay from Nostr event differs from environment variable
-        // This mirrors the logic in NostrSync to ensure consistency
+        const homepageSectionOrderTag = eventTags.find(([name]) => name === 'homepage_section_order')?.[1];
+        if (homepageSectionOrderTag) {
+          try {
+            const parsed = JSON.parse(homepageSectionOrderTag);
+            if (Array.isArray(parsed)) loadedConfig.homepageSectionOrder = parsed;
+          } catch (e) {
+            console.error('Failed to parse homepage_section_order tag', e);
+          }
+        }
+
         const envDefaultRelay = getDefaultRelayUrl();
         const relayFromEvent = loadedConfig.defaultRelay as string | undefined;
 
@@ -616,7 +456,6 @@ export default function AdminSettings() {
           }
         }
 
-        // Also load navigation from content
         let loadedNavigation: NavigationItem[] = [];
         try {
           const parsedContent = JSON.parse(event.content);
@@ -635,7 +474,6 @@ export default function AdminSettings() {
         }) as SiteConfig);
         setNavigation(loadedNavigation);
 
-        // Update local app config immediately
         updateConfig((currentConfig) => ({
           ...currentConfig,
           siteConfig: {
@@ -646,7 +484,6 @@ export default function AdminSettings() {
           navigation: loadedNavigation,
         }));
 
-        // Clear all query cache to force refresh with new config
         queryClient.clear();
       }
     } catch (error) {
@@ -661,7 +498,6 @@ export default function AdminSettings() {
     const filteredRelays = siteConfig.publishRelays.filter(r => r.trim() !== '');
 
     try {
-      // Save site configuration as a replaceable event (kind 30078) following NIP-78
       const scopedDTag = getSiteConfigDTag();
       const configTags = [
         ['d', scopedDTag],
@@ -672,11 +508,17 @@ export default function AdminSettings() {
         ['hero_title', siteConfig.heroTitle],
         ['hero_subtitle', siteConfig.heroSubtitle],
         ['hero_background', siteConfig.heroBackground],
+        ['hero_background_type', siteConfig.heroBackgroundType],
+        ['hero_background_color', siteConfig.heroBackgroundColor],
+        ['hero_text_color', siteConfig.heroTextColor],
+        ['hero_banner', siteConfig.heroBanner],
         ['hero_buttons', JSON.stringify(siteConfig.heroButtons)],
         ['show_events', siteConfig.showEvents.toString()],
         ['show_blog', siteConfig.showBlog.toString()],
+        ['show_feed', siteConfig.showFeed.toString()],
         ['max_events', siteConfig.maxEvents.toString()],
         ['max_blog_posts', siteConfig.maxBlogPosts.toString()],
+        ['max_feed_notes', siteConfig.maxFeedNotes.toString()],
         ['default_relay', siteConfig.defaultRelay],
         ['publish_relays', JSON.stringify(filteredRelays)],
         ['admin_roles', JSON.stringify(siteConfig.adminRoles)],
@@ -685,11 +527,13 @@ export default function AdminSettings() {
         ['tweakcn_theme_url', siteConfig.tweakcnThemeUrl || ''],
         ['nip19_gateway', siteConfig.nip19Gateway || 'https://nostr.at'],
         ['section_order', JSON.stringify(siteConfig.sectionOrder)],
+        ['homepage_section_order', JSON.stringify(siteConfig.homepageSectionOrder)],
         ['read_only_admin_access', siteConfig.readOnlyAdminAccess.toString()],
+        ['auto_harvest_24h', (siteConfig.autoHarvest24h ?? false).toString()],
         ['updated_at', Math.floor(Date.now() / 1000).toString()],
       ];
 
-      publishEvent({
+      await publishEvent({
         event: {
           kind: 30078,
           content: JSON.stringify({ navigation }),
@@ -697,7 +541,6 @@ export default function AdminSettings() {
         }
       });
 
-      // Update local app config
       updateConfig((currentConfig) => ({
         ...currentConfig,
         siteConfig: {
@@ -709,7 +552,6 @@ export default function AdminSettings() {
         navigation,
       }));
 
-      // Clear all query cache to force refresh with new config
       queryClient.clear();
     } catch (error) {
       console.error('Failed to save config:', error);
@@ -718,43 +560,24 @@ export default function AdminSettings() {
     }
   };
 
-  const addNavigationItem = () => {
-    const newItem: NavigationItem = {
-      id: Date.now().toString(),
-      name: 'New Item',
-      href: '/new-page',
-      isSubmenu: false,
-    };
-    setNavigation([...navigation, newItem]);
-  };
-
-  const removeNavigationItem = (id: string) => {
-    setNavigation(navigation.filter(item => item.id !== id));
-  };
-
-  const updateNavigationItem = (id: string, updates: Partial<NavigationItem>) => {
-    setNavigation(navigation.map(item =>
-      item.id === id ? { ...item, ...updates } : item
-    ));
-  };
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 pb-20">
+      <div className="space-y-3">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Site Settings</h2>
           <p className="text-muted-foreground">
             Configure your site appearance and navigation.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleLoadConfig} disabled={isRefreshing || !user || !isMasterUser}>
+        <div className="flex justify-between items-center gap-2">
+          <SettingsPresets
+            onApply={handleApplyPreset}
+            disabled={disabled}
+            hasUnsavedChanges={isDirty}
+          />
+          <Button variant="outline" size="sm" onClick={handleLoadConfig} disabled={isRefreshing || !user || !isMasterUser} className="shrink-0">
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh from Relay'}
-          </Button>
-          <Button onClick={handleSaveConfig} disabled={isSaving || !isMasterUser}>
-            <Save className="h-4 w-4 mr-2" />
-            {isSaving ? 'Saving...' : 'Save Changes'}
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
         </div>
       </div>
@@ -774,415 +597,88 @@ export default function AdminSettings() {
         onDragEnd={handleSectionDragEnd}
       >
         <SortableContext
-          items={siteConfig.sectionOrder || ['navigation', 'basic', 'styling', 'hero', 'content', 'feed']}
+          items={sectionOrder}
           strategy={verticalListSortingStrategy}
         >
           <div className="space-y-6">
-            {(siteConfig.sectionOrder || ['navigation', 'basic', 'styling', 'hero', 'content', 'feed']).map((sectionId) => {
+            {sectionOrder.map((sectionId) => {
               switch (sectionId) {
                 case 'basic':
                   return (
-                    <SortableSection key="basic" id="basic" title="Basic Information">
-                      <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="title">Site Title</Label>
-                            <Input
-                              id="title"
-                              value={siteConfig.title}
-                              onChange={(e) => setSiteConfig(prev => ({ ...prev, title: e.target.value }))}
-                              placeholder="My Meetup Site"
-                              disabled={!isMasterUser}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="logo">Logo URL</Label>
-                            <Input
-                              id="logo"
-                              value={siteConfig.logo}
-                              onChange={(e) => setSiteConfig(prev => ({ ...prev, logo: e.target.value }))}
-                              placeholder="https://..."
-                              disabled={!isMasterUser}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="favicon">Favicon URL</Label>
-                            <Input
-                              id="favicon"
-                              value={siteConfig.favicon}
-                              onChange={(e) => setSiteConfig(prev => ({ ...prev, favicon: e.target.value }))}
-                              placeholder="https://..."
-                              disabled={!isMasterUser}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="ogImage">Open Graph Image URL</Label>
-                            <Input
-                              id="ogImage"
-                              value={siteConfig.ogImage}
-                              onChange={(e) => setSiteConfig(prev => ({ ...prev, ogImage: e.target.value }))}
-                              placeholder="https://..."
-                              disabled={!isMasterUser}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="nip19Gateway">NIP-19 Gateway URL</Label>
-                            <Select
-                              value={siteConfig.nip19Gateway || 'https://nostr.at'}
-                              onValueChange={(val) => setSiteConfig(prev => ({ ...prev, nip19Gateway: val }))}
-                              disabled={!isMasterUser}
-                            >
-                              <SelectTrigger id="nip19Gateway">
-                                <SelectValue placeholder="Select a gateway" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="https://nostr.at">nostr.at</SelectItem>
-                                <SelectItem value="https://njump.me">njump.me</SelectItem>
-                                <SelectItem value="https://nostr.ae">nostr.ae</SelectItem>
-                                <SelectItem value="https://nostr.eu">nostr.eu</SelectItem>
-                                <SelectItem value="https://primal.net">primal.net</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-[10px] text-muted-foreground mt-1">
-                              External gateway used for viewing Nostr identifiers (npub, note, etc.).
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </SortableSection>
+                    <BasicInfoSection
+                      key="basic"
+                      title={siteConfig.title}
+                      logo={siteConfig.logo}
+                      favicon={siteConfig.favicon}
+                      ogImage={siteConfig.ogImage}
+                      nip19Gateway={siteConfig.nip19Gateway || 'https://nostr.at'}
+                      onChange={updateSiteConfig}
+                      disabled={disabled}
+                      isDirty={dirtyBasic}
+                    />
                   );
                 case 'styling':
                   return (
-                    <SortableSection
+                    <StylingSection
                       key="styling"
-                      id="styling"
-                      title="Site Styling (TweakCN)"
-                      description="TweakCN is a powerful theme engine that allows you to customize the visual appearance of your site using a simple JSON configuration."
-                    >
-                      <CardContent className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>Select a Preset Theme</Label>
-                          <div className="flex gap-2">
-                            <Select
-                              value={TWEAKCN_THEMES.find(t => t.url === siteConfig.tweakcnThemeUrl)?.url ?? 'none'}
-                              onValueChange={(url) => {
-                                setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: url === 'none' ? '' : url }));
-                                setPreviewThemeUrl(null); // Clear preview when selection changes
-                              }}
-                              disabled={!isMasterUser}
-                            >
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select a theme" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {TWEAKCN_THEMES.map((theme) => (
-                                  <SelectItem key={theme.name} value={theme.url}>
-                                    {theme.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {siteConfig.tweakcnThemeUrl && TWEAKCN_THEMES.some(t => t.url === siteConfig.tweakcnThemeUrl) && (
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                title="Preview Theme"
-                                onClick={() => {
-                                  setPreviewThemeUrl(siteConfig.tweakcnThemeUrl || null);
-                                  toast({
-                                    title: "Theme Preview",
-                                    description: "Previewing selected theme. Save changes to apply permanently.",
-                                  });
-                                }}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-
-                        <Separator />
-
-                        <div className="space-y-2">
-                          <Label htmlFor="customThemeUrl">Custom TweakCN Theme URL</Label>
-                          <div className="flex gap-2">
-                            <Input
-                              id="customThemeUrl"
-                              value={siteConfig.tweakcnThemeUrl}
-                              onChange={(e) => {
-                                setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: e.target.value }));
-                                setPreviewThemeUrl(null);
-                              }}
-                              placeholder="https://tweakcn.com/r/themes/..."
-                              disabled={!isMasterUser}
-                            />
-                            <div className="flex gap-1">
-                              {siteConfig.tweakcnThemeUrl && (
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  title="Preview Custom Theme"
-                                  onClick={() => {
-                                    if (siteConfig.tweakcnThemeUrl) {
-                                      setPreviewThemeUrl(siteConfig.tweakcnThemeUrl);
-                                      toast({
-                                        title: "Custom Theme Preview",
-                                        description: "Previewing custom theme. Save changes to apply permanently.",
-                                      });
-                                    }
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              )}
-                              {siteConfig.tweakcnThemeUrl && !TWEAKCN_THEMES.some(t => t.url === siteConfig.tweakcnThemeUrl) && (
-                                <Button
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSiteConfig(prev => ({ ...prev, tweakcnThemeUrl: '' }));
-                                    setPreviewThemeUrl(null);
-                                  }}
-                                >
-                                  Clear
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Enter a direct link to a <a href="https://tweakcn.com/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">TweakCN</a> theme JSON file to apply custom styling.
-                          </p>
-                        </div>
-
-                        {isDirty && (
-                          <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 rounded-md text-sm border border-yellow-200 dark:border-yellow-900/30">
-                            <AlertCircle className="h-4 w-4" />
-                            <span>You have unsaved changes. Remember to save before navigating away.</span>
-                          </div>
-                        )}
-                      </CardContent>
-                    </SortableSection>
+                      tweakcnThemeUrl={siteConfig.tweakcnThemeUrl || ''}
+                      onChange={updateSiteConfig}
+                      disabled={disabled}
+                      isDirty={dirtyStyling}
+                    />
                   );
                 case 'hero':
                   return (
-                    <SortableSection key="hero" id="hero" title="Hero Section">
-                      <CardContent className="space-y-4">
-                        <div>
-                          <Label htmlFor="heroTitle">Hero Title</Label>
-                          <Input
-                            id="heroTitle"
-                            value={siteConfig.heroTitle}
-                            onChange={(e) => setSiteConfig(prev => ({ ...prev, heroTitle: e.target.value }))}
-                            placeholder="Welcome to Our Community"
-                            disabled={!isMasterUser}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="heroSubtitle">Hero Subtitle</Label>
-                          <Input
-                            id="heroSubtitle"
-                            value={siteConfig.heroSubtitle}
-                            onChange={(e) => setSiteConfig(prev => ({ ...prev, heroSubtitle: e.target.value }))}
-                            placeholder="Join us for amazing meetups and events"
-                            disabled={!isMasterUser}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="heroBackground">Hero Background Image URL</Label>
-                          <Input
-                            id="heroBackground"
-                            value={siteConfig.heroBackground}
-                            onChange={(e) => setSiteConfig(prev => ({ ...prev, heroBackground: e.target.value }))}
-                            placeholder="https://..."
-                            disabled={!isMasterUser}
-                          />
-                        </div>
-                      </CardContent>
-                    </SortableSection>
+                    <HeroSection
+                      key="hero"
+                      heroBanner={siteConfig.heroBanner}
+                      heroTitle={siteConfig.heroTitle}
+                      heroSubtitle={siteConfig.heroSubtitle}
+                      heroBackgroundType={siteConfig.heroBackgroundType}
+                      heroBackground={siteConfig.heroBackground}
+                      heroBackgroundColor={siteConfig.heroBackgroundColor}
+                      heroTextColor={siteConfig.heroTextColor}
+                      onChange={updateSiteConfig}
+                      disabled={disabled}
+                      isDirty={dirtyHero}
+                    />
                   );
                 case 'content':
                   return (
-                    <SortableSection key="content" id="content" title="Content Display">
-                      <CardContent className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <Label>Show Events on Homepage</Label>
-                            <p className="text-sm text-muted-foreground">Display upcoming events on the home page</p>
-                          </div>
-                          <Switch
-                            checked={siteConfig.showEvents}
-                            onCheckedChange={(checked) => setSiteConfig(prev => ({ ...prev, showEvents: checked }))}
-                            disabled={!isMasterUser}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <Label>Show Blog Posts on Homepage</Label>
-                            <p className="text-sm text-muted-foreground">Display recent blog posts on home page</p>
-                          </div>
-                          <Switch
-                            checked={siteConfig.showBlog}
-                            onCheckedChange={(checked) => setSiteConfig(prev => ({ ...prev, showBlog: checked }))}
-                            disabled={!isMasterUser}
-                          />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="maxEvents">Maximum Events to Show</Label>
-                            <Input
-                              id="maxEvents"
-                              type="number"
-                              value={siteConfig.maxEvents}
-                              onChange={(e) => setSiteConfig(prev => ({ ...prev, maxEvents: parseInt(e.target.value) || 6 }))}
-                              min="1"
-                              max="20"
-                              disabled={!isMasterUser}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="maxBlogPosts">Maximum Blog Posts to Show</Label>
-                            <Input
-                              id="maxBlogPosts"
-                              type="number"
-                              value={siteConfig.maxBlogPosts}
-                              onChange={(e) => setSiteConfig(prev => ({ ...prev, maxBlogPosts: parseInt(e.target.value) || 3 }))}
-                              min="1"
-                              max="20"
-                              disabled={!isMasterUser}
-                            />
-                          </div>
-                        </div>
-
-                        <Separator />
-
-                        <div>
-                          <div className="flex items-center justify-between mb-4">
-                            <div>
-                              <Label>Hero Buttons</Label>
-                              <p className="text-sm text-muted-foreground">Configure buttons displayed in the hero section</p>
-                            </div>
-                          </div>
-
-                          {siteConfig.heroButtons.map((button, index) => (
-                            <div key={index} className="mb-4 p-4 border rounded-md space-y-3">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium">Button {index + 1}</span>
-                                <div className="flex items-center gap-2">
-                                  <Label htmlFor={`enable-button-${index}`} className="text-xs text-muted-foreground">Enabled</Label>
-                                  <Switch
-                                    id={`enable-button-${index}`}
-                                    checked={button.label !== '' && button.href !== ''}
-                                    onCheckedChange={(checked) => {
-                                      const newButtons = [...siteConfig.heroButtons];
-                                      if (!checked) {
-                                        newButtons[index] = { ...button, label: '', href: '' };
-                                      } else {
-                                        newButtons[index] = { ...button, label: `Button ${index + 1}`, href: '/' };
-                                      }
-                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
-                                    }}
-                                    disabled={!isMasterUser}
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div>
-                                  <Label htmlFor={`button-label-${index}`} className="text-xs">Button Label</Label>
-                                  <Input
-                                    id={`button-label-${index}`}
-                                    value={button.label}
-                                    onChange={(e) => {
-                                      const newButtons = [...siteConfig.heroButtons];
-                                      newButtons[index] = { ...button, label: e.target.value };
-                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
-                                    }}
-                                    placeholder="View Events"
-                                    disabled={!isMasterUser || (button.label === '' && button.href === '')}
-                                  />
-                                </div>
-                                <div>
-                                  <Label htmlFor={`button-href-${index}`} className="text-xs">Button Link</Label>
-                                  <Input
-                                    id={`button-href-${index}`}
-                                    value={button.href}
-                                    onChange={(e) => {
-                                      const newButtons = [...siteConfig.heroButtons];
-                                      newButtons[index] = { ...button, href: e.target.value };
-                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
-                                    }}
-                                    placeholder="/events"
-                                    disabled={!isMasterUser || (button.label === '' && button.href === '')}
-                                  />
-                                </div>
-                                <div>
-                                  <Label htmlFor={`button-variant-${index}`} className="text-xs">Button Style</Label>
-                                  <Select
-                                    value={button.variant || 'default'}
-                                    onValueChange={(val: 'default' | 'outline') => {
-                                      const newButtons = [...siteConfig.heroButtons];
-                                      newButtons[index] = { ...button, variant: val };
-                                      setSiteConfig(prev => ({ ...prev, heroButtons: newButtons }));
-                                    }}
-                                    disabled={!isMasterUser || (button.label === '' && button.href === '')}
-                                  >
-                                    <SelectTrigger id={`button-variant-${index}`}>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="default">Default (Filled)</SelectItem>
-                                      <SelectItem value="outline">Outline</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </SortableSection>
+                    <ContentDisplaySection
+                      key="content"
+                      showEvents={siteConfig.showEvents}
+                      showBlog={siteConfig.showBlog}
+                      showFeed={siteConfig.showFeed}
+                      maxEvents={siteConfig.maxEvents}
+                      maxBlogPosts={siteConfig.maxBlogPosts}
+                      maxFeedNotes={siteConfig.maxFeedNotes}
+                      heroButtons={siteConfig.heroButtons}
+                      onChange={updateSiteConfig}
+                      disabled={disabled}
+                      isDirty={dirtyContent}
+                    />
                   );
                 case 'navigation':
                   return (
-                    <SortableSection key="navigation" id="navigation" title="Navigation Menu">
-                      <CardContent className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <Label>Main Navigation</Label>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={!isMasterUser}
-                            onClick={() => addNavigationItem()}
-                          >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Item
-                          </Button>
-                        </div>
-
-                        <div className="space-y-4">
-                          <DndContext
-                            sensors={sensors}
-                            collisionDetection={closestCenter}
-                            onDragEnd={handleDragEnd}
-                          >
-                            <SortableContext
-                              items={navigation.map(i => i.id)}
-                              strategy={verticalListSortingStrategy}
-                            >
-                              {navigation.map((item) => (
-                                <SortableNavItem
-                                  key={item.id}
-                                  item={item}
-                                  navigation={navigation}
-                                  onUpdate={updateNavigationItem}
-                                  onRemove={removeNavigationItem}
-                                  disabled={!isMasterUser}
-                                />
-                              ))}
-                            </SortableContext>
-                          </DndContext>
-                        </div>
-                      </CardContent>
-                    </SortableSection>
+                    <NavigationSection
+                      key="navigation"
+                      navigation={navigation}
+                      onNavigationChange={setNavigation}
+                      disabled={disabled}
+                      isDirty={dirtyNavigation}
+                    />
+                  );
+                case 'homepage':
+                  return (
+                    <HomepageLayoutSection
+                      key="homepage"
+                      homepageSectionOrder={reconciledHomepageOrder}
+                      homepagePages={homepagePages}
+                      onChange={updateSiteConfig}
+                      disabled={disabled}
+                      isDirty={dirtyHomepage}
+                    />
                   );
                 default:
                   return null;
@@ -1191,6 +687,59 @@ export default function AdminSettings() {
           </div>
         </SortableContext>
       </DndContext>
+
+      {/* Sticky save bar — visible only when there are unsaved changes */}
+      {isDirty && isMasterUser && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background shadow-lg">
+          <div className="mx-auto max-w-4xl flex items-center justify-between gap-2 px-4 py-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <span className="text-sm text-muted-foreground flex items-center gap-2 shrink-0">
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+              <span className="hidden sm:inline">Unsaved changes</span>
+              <span className="sm:hidden text-xs">Unsaved</span>
+            </span>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPreviewOpen(true)}
+                disabled={isSaving}
+                className="shrink-0"
+              >
+                <Eye className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Preview</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLoadConfig}
+                disabled={isRefreshing || isSaving}
+                className="shrink-0"
+              >
+                <RotateCcw className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Discard</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveConfig}
+                disabled={isSaving}
+                className="shrink-0"
+              >
+                <Save className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">{isSaving ? 'Saving...' : 'Save Changes'}</span>
+                <span className="sm:hidden">{isSaving ? '...' : 'Save'}</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live homepage preview dialog */}
+      <HomepagePreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        siteConfig={siteConfig}
+        navigation={navigation}
+      />
     </div>
   );
 }

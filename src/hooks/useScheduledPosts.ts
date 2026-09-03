@@ -54,20 +54,29 @@ async function fetchWithNip98(urlStr: string, method: string, body?: unknown) {
   // 3. Create Authorization header
   const token = btoa(JSON.stringify(signed));
 
-  // 4. Fetch
+  // 4. Fetch with timeout to avoid indefinite hanging if the extension
+  //    or network is slow/unresponsive.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
   const options: RequestInit = {
     method,
     headers: {
       'Authorization': `Nostr ${token}`,
       'Content-Type': 'application/json',
     },
+    signal: controller.signal,
   };
 
   if (body) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(url, options);
+  let response: Response;
+  try {
+    response = await fetch(url, options);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const text = await response.text();
@@ -116,32 +125,28 @@ export function useScheduledPosts(userPubkey: string | undefined, status?: strin
 }
 
 /**
- * Fetch stats for scheduled posts
+ * Derive stats from the useScheduledPosts query data.
+ * This avoids a redundant NIP-98 signing round-trip to the same /scheduler/list
+ * endpoint on every page load and every 30s refetch.
  */
 export function useScheduledPostsStats(userPubkey: string | undefined) {
+  const { data: posts } = useScheduledPosts(userPubkey);
+
   return useQuery({
-    queryKey: ['scheduled-posts-stats', userPubkey],
+    queryKey: ['scheduled-posts-stats', userPubkey, posts],
     queryFn: async () => {
-      if (!userPubkey) return { pending: 0, published: 0, failed: 0 };
-
-      const posts = await fetchWithNip98('/scheduler/list', 'GET') as ScheduledPost[];
-
-      const stats: ScheduledPostStats = {
-        pending: 0,
-        published: 0,
-        failed: 0,
-      };
-
-      posts.forEach((post) => {
+      const stats: ScheduledPostStats = { pending: 0, published: 0, failed: 0 };
+      (posts || []).forEach((post) => {
         if (post.status in stats) {
           stats[post.status as keyof ScheduledPostStats]++;
         }
       });
-
       return stats;
     },
     enabled: !!userPubkey,
-    refetchInterval: 30000,
+    // Data is derived from useScheduledPosts, so we don't need to refetch
+    // on a timer — it updates whenever the parent query updates.
+    refetchInterval: false,
   });
 }
 
@@ -165,6 +170,29 @@ export function useScheduledPost(id: string | undefined) {
 }
 
 // ============================================================================
+// Direct API helpers (no query invalidation — used by useCreateRepost loop)
+// ============================================================================
+
+/**
+ * Schedule a post via the API directly, without triggering query invalidation.
+ * Used by useCreateRepost when scheduling multiple repeating reposts in a loop,
+ * to avoid race conditions with NIP-98 signing from concurrent refetches.
+ */
+export async function schedulePostViaApi(input: {
+  signedEvent: NostrEvent;
+  relays: string[];
+  scheduledFor: Date;
+}): Promise<ScheduledPost> {
+  const body = {
+    signed_event: input.signedEvent,
+    relays: input.relays,
+    scheduled_for: input.scheduledFor.toISOString(),
+  };
+  const result = await fetchWithNip98('/scheduler/schedule', 'POST', body);
+  return result as ScheduledPost;
+}
+
+// ============================================================================
 // Mutations
 // ============================================================================
 
@@ -176,16 +204,7 @@ export function useCreateScheduledPost() {
 
   return useMutation({
     mutationFn: async (input: CreateScheduledPostInput) => {
-      const { signedEvent, relays, scheduledFor } = input;
-
-      const body = {
-        signed_event: signedEvent,
-        relays,
-        scheduled_for: scheduledFor.toISOString(),
-      };
-
-      const result = await fetchWithNip98('/scheduler/schedule', 'POST', body);
-      return result as ScheduledPost;
+      return schedulePostViaApi(input);
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({

@@ -11,8 +11,9 @@ import {
   Target
 } from 'lucide-react';
 import type { ContentPerformance } from '@/types/zaplytics';
-import { formatSats, truncateText, createNjumpEventLink } from '@/lib/zaplytics/utils';
+import { formatSats, createNjumpEventLink } from '@/lib/zaplytics/utils';
 import { KIND_NAMES } from '@/types/zaplytics';
+import { ContentPreview } from '@/components/zaplytics/ContentPreview';
 
 interface ContentPerformanceProps {
   data: ContentPerformance[];
@@ -107,9 +108,9 @@ export function ContentPerformance({ data, isLoading }: ContentPerformanceProps)
                 )}
               </div>
               
-              <p className="text-sm text-muted-foreground leading-relaxed mb-3">
-                {truncateText(item.content, 120)}
-              </p>
+              <div className="mb-3">
+                <ContentPreview content={item.content} maxLength={120} />
+              </div>
 
               {/* Metrics Grid */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">

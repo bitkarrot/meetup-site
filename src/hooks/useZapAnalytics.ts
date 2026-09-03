@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -31,14 +31,15 @@ import {
  * Configuration for zap fetching - optimized for progressive loading
  */
 const ZAP_FETCH_CONFIG = {
-  INITIAL_BATCH_SIZE: 1000, // Start with larger batches to detect relay limits
+  INITIAL_BATCH_SIZE: 2000, // Large enough to fetch all receipts in one batch from local relay
   MIN_BATCH_SIZE: 250, // Minimum batch size when relay limits are hit
   MAX_BATCH_SIZE: 2000, // Maximum batch size to prevent timeouts
-  TIMEOUT_MS: 8000, // Reduced from 15s for better responsiveness
+  TIMEOUT_MS: 3000, // Short timeout for 24h/7d — local relay is fast
+  ALL_TIME_TIMEOUT_MS: 15000, // 15s for all-time — mobile networks need more time for 1263+ events
   STALE_TIME: 60000, // 1 minute cache
   REFETCH_INTERVAL: 300000, // Refetch every 5 minutes
-  BATCH_DELAY_MS: 300, // Delay between automatic batches (increased for rate limiting)
-  AUTO_LOAD_DELAY_MS: 1000, // Delay before starting automatic loading
+  BATCH_DELAY_MS: 200, // Delay between automatic batches
+  AUTO_LOAD_DELAY_MS: 300, // Delay before starting automatic loading
   MAX_CONSECUTIVE_FAILURES: 3, // Stop auto-loading after 3 consecutive failures
 } as const;
 
@@ -233,9 +234,11 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
       // Cap the batch size to prevent timeouts
       batchSize = Math.min(batchSize, ZAP_FETCH_CONFIG.MAX_BATCH_SIZE);
 
-      // For automatic loading, use smaller batches to be more conservative with rate limits
-      if (isAutomatic && currentState.currentBatch > 0) {
-        batchSize = Math.min(batchSize, currentState.relayLimit || ZAP_FETCH_CONFIG.MIN_BATCH_SIZE);
+      // For automatic loading, if we detected a relay limit, use it.
+      // If no limit was detected (relay returned full batches), keep using
+      // the initial batch size — don't artificially reduce to MIN_BATCH_SIZE.
+      if (isAutomatic && currentState.currentBatch > 0 && currentState.relayLimit) {
+        batchSize = Math.min(batchSize, currentState.relayLimit);
       }
 
       const filter: {
@@ -259,7 +262,7 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
 
       const batchSignal = AbortSignal.any([
         abortControllerRef.current.signal,
-        AbortSignal.timeout(ZAP_FETCH_CONFIG.TIMEOUT_MS)
+        AbortSignal.timeout(timeRange === 'all' ? ZAP_FETCH_CONFIG.ALL_TIME_TIMEOUT_MS : ZAP_FETCH_CONFIG.TIMEOUT_MS)
       ]);
 
       // Fan out to NIP-65 relays since zap receipts may live on multiple relays
@@ -270,10 +273,19 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
         isValidZapReceipt(event as NostrEvent)
       ).sort((a, b) => b.created_at - a.created_at);
 
+      // Deduplicate against the current cache by event ID.
+      // Without this, receipts returned from multiple relays in overlapping
+      // batches get double-counted, inflating totals. Also prevents infinite
+      // pagination loops where the relay keeps returning the same cached receipts.
+      const currentCacheIds = new Set(currentState.allReceiptsCache.map(r => r.id));
+      const newUnique = validReceipts.filter(r => !currentCacheIds.has(r.id));
+
       // Update state synchronously
       setState(prev => {
-        // Update the complete cache with new receipts
-        const allReceipts = [...prev.allReceiptsCache, ...validReceipts].sort((a, b) => b.created_at - a.created_at);
+        // Re-check against prev in case state changed between reads
+        const prevSeen = new Set(prev.allReceiptsCache.map(r => r.id));
+        const prevNewUnique = validReceipts.filter(r => !prevSeen.has(r.id));
+        const allReceipts = [...prev.allReceiptsCache, ...prevNewUnique].sort((a, b) => b.created_at - a.created_at);
 
         // Update the global cache for this user
         if (pubkey) {
@@ -293,25 +305,52 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
           }
         });
 
-        // Detect relay limit based on batch results
-        const detectedLimit = validReceipts.length < batchSize && validReceipts.length > 0
-          ? Math.max(validReceipts.length, ZAP_FETCH_CONFIG.MIN_BATCH_SIZE)
+        // Detect relay limit based on batch results.
+        // Use prevNewUnique (deduplicated against cache) so we don't mistake
+        // already-cached results for a relay limit.
+        // Use a reasonable minimum (100) so we don't end up with tiny batches
+        // of 5 events that take forever to paginate through 1263 receipts.
+        // The isComplete check below uses the actual count, not the inflated
+        // limit, so this doesn't cause premature completion.
+        const detectedLimit = prevNewUnique.length < batchSize && prevNewUnique.length > 0
+          ? Math.max(prevNewUnique.length, 100)
           : prev.relayLimit;
 
-        // Determine if loading is complete
+        // Determine if loading is complete.
+        // Use prevNewUnique for checks — if all results were already in the
+        // cache, there's no new data to paginate through.
         const expectedBatchSize = detectedLimit || batchSize;
         let isComplete = false;
 
-        if (validReceipts.length === 0) {
-          // If we got 0 results and we have a 'since' filter, there's nothing in this window
-          isComplete = !!since;
+        if (prevNewUnique.length === 0) {
+          // No new unique results. Two cases:
+          // 1. Relay returned events but all were already cached → end of data
+          // 2. Relay returned 0 events (timeout/abort) → NOT end of data
+          // For 'all' time, only mark complete if the relay actually returned
+          // events (all duplicates). If it returned nothing, it might be a
+          // timeout, so keep loading to retry.
+          if (timeRange === 'all' && validReceipts.length === 0) {
+            // Likely a timeout — don't mark complete, retry
+            isComplete = false;
+          } else {
+            isComplete = true;
+          }
+        } else if (timeRange === 'all') {
+          // For 'all' time, don't mark complete based on count alone.
+          // A batch might return fewer results than requested due to
+          // network timeout (especially on mobile), not because we've
+          // reached the end of the data. Only mark complete when a
+          // subsequent batch returns 0 new results (handled above).
+          // The pagination cursor (until = oldest - 1) ensures we keep
+          // fetching older data until the relay genuinely has nothing left.
+          isComplete = false;
         } else {
-          // If we got results, but fewer than the limit, we've exhausted the relay's data for this window
-          isComplete = validReceipts.length < expectedBatchSize;
+          // If we got fewer new results than expected, we've reached the end
+          isComplete = prevNewUnique.length < expectedBatchSize;
 
           // Also check time boundary for safety with preset ranges
           if (!isComplete && timeRange !== 'custom') {
-            const oldestNewReceipt = Math.min(...validReceipts.map(r => r.created_at));
+            const oldestNewReceipt = Math.min(...prevNewUnique.map(r => r.created_at));
             const BOUNDARY_TOLERANCE_SECONDS = 3600; // 1 hour tolerance
             if (oldestNewReceipt <= (since + BOUNDARY_TOLERANCE_SECONDS)) {
               isComplete = true;
@@ -329,20 +368,21 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
           totalFetched: filteredReceipts.length,
           relayLimit: detectedLimit,
           consecutiveFailures: 0, // Reset failures on success
-          consecutiveZeroResults: validReceipts.length === 0 ? prev.consecutiveZeroResults + 1 : 0, // Track zero results
+          consecutiveZeroResults: prevNewUnique.length === 0 ? prev.consecutiveZeroResults + 1 : 0, // Track zero results
         };
       });
 
       // Schedule next automatic batch if appropriate
       if (isAutomatic) {
-        // If we're doing automatic loading and got a substantial amount of data, continue
-        const shouldContinueAutoLoad = validReceipts.length > 0 &&
-          (
-            // Continue if we got a "full" batch (same as requested batch size)
-            validReceipts.length >= batchSize * 0.9 ||
-            // Or continue if we got at least a reasonable amount
-            validReceipts.length >= 100
-          );
+        // Continue auto-loading as long as we got NEW results.
+        // Using newUnique (deduplicated) prevents infinite loops where
+        // the relay keeps returning the same cached receipts.
+        // EXCEPTION: for 'all' time, if we got 0 events (likely timeout),
+        // keep retrying — the relay may have more data that just didn't
+        // arrive in time. The isComplete logic above ensures we stop when
+        // the relay genuinely returns all duplicates (end of data).
+        const shouldContinueAutoLoad = newUnique.length > 0 ||
+          (timeRange === 'all' && validReceipts.length === 0 && !stateRef.current.isComplete);
 
         if (shouldContinueAutoLoad) {
           autoLoadTimeoutRef.current = setTimeout(() => {
@@ -432,14 +472,13 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
           });
         }, 100);
       } else {
-        const delay = hasDataForTimeRange ? ZAP_FETCH_CONFIG.AUTO_LOAD_DELAY_MS * 2 : ZAP_FETCH_CONFIG.AUTO_LOAD_DELAY_MS;
         autoLoadTimeoutRef.current = setTimeout(() => {
           try {
             loadMoreZaps(true);
           } catch (error) {
             console.error('Error in auto-load timeout:', error);
           }
-        }, delay);
+        }, ZAP_FETCH_CONFIG.AUTO_LOAD_DELAY_MS);
       }
     }
 
@@ -450,7 +489,12 @@ function useProgressiveZapReceipts(timeRange: TimeRange = '7d', customRange?: Cu
         autoLoadTimeoutRef.current = null;
       }
     };
-  }, [pubkey, timeRange, customRange, loadMoreZaps]);
+  // state.isComplete is needed in deps because the cache-filter effect
+  // (above) updates isComplete when timeRange changes. Without this dep,
+  // this auto-start effect reads stale isComplete from stateRef and
+  // incorrectly skips loading (e.g. switching from '7d' to 'all' where
+  // the old isComplete=true hasn't been updated to false yet).
+  }, [pubkey, timeRange, customRange, loadMoreZaps, state.isComplete]);
 
   // Additional effect to handle time range changes that need extended data
   useEffect(() => {
@@ -762,22 +806,25 @@ export function useZapAnalytics(timeRange: TimeRange = '7d', customRange?: Custo
     isLoading: _profilesLoading
   } = useZapperProfiles(allPubkeys);
 
-  return useQuery({
-    queryKey: ['zap-analytics', timeRange, customRange, progressiveData.totalFetched, progressiveData.isLoading, progressiveData.isComplete, contentMap.size, profileMap.size, shouldQueryData],
-    queryFn: async (): Promise<AnalyticsData & {
-      loadingState: {
-        isLoading: boolean;
-        isComplete: boolean;
-        totalFetched: number;
-        relayLimit: number | null;
-        canLoadMore: boolean;
-        loadMoreZaps: () => void;
-        autoLoadEnabled: boolean;
-        consecutiveFailures: number;
-        toggleAutoLoad: () => void;
-        restartAutoLoad: () => void;
-      }
-    }> => {
+  // loadingState is returned DIRECTLY from progressiveData, not through
+  // react-query. This ensures the loading animation updates instantly when
+  // a batch starts/ends, without waiting for react-query to refetch.
+  const loadingState = {
+    isLoading: progressiveData.isLoading || _contentLoading || _profilesLoading,
+    isComplete: progressiveData.isComplete && !_contentLoading && !_profilesLoading,
+    totalFetched: progressiveData.totalFetched,
+    relayLimit: progressiveData.relayLimit,
+    canLoadMore: !progressiveData.isComplete && !progressiveData.isLoading,
+    loadMoreZaps: progressiveData.loadMoreZaps,
+    autoLoadEnabled: progressiveData.autoLoadEnabled,
+    consecutiveFailures: progressiveData.consecutiveFailures,
+    toggleAutoLoad: progressiveData.toggleAutoLoad,
+    restartAutoLoad: progressiveData.restartAutoLoad,
+  };
+
+  const query = useQuery({
+    queryKey: ['zap-analytics', timeRange, customRange, progressiveData.totalFetched, progressiveData.isComplete, contentMap.size, profileMap.size, shouldQueryData],
+    queryFn: async (): Promise<AnalyticsData> => {
       // If custom range is incomplete, return empty analytics
       if (timeRange === 'custom' && (!customRange?.from || !customRange?.to)) {
         return {
@@ -803,18 +850,6 @@ export function useZapAnalytics(timeRange: TimeRange = '7d', customRange?: Custo
           },
           contentPerformance: [],
           hashtagPerformance: [],
-          loadingState: {
-            isLoading: false,
-            isComplete: true,
-            totalFetched: 0,
-            relayLimit: null,
-            canLoadMore: false,
-            loadMoreZaps: progressiveData.loadMoreZaps,
-            autoLoadEnabled: progressiveData.autoLoadEnabled,
-            consecutiveFailures: progressiveData.consecutiveFailures,
-            toggleAutoLoad: progressiveData.toggleAutoLoad,
-            restartAutoLoad: progressiveData.restartAutoLoad,
-          },
         };
       }
 
@@ -890,23 +925,24 @@ export function useZapAnalytics(timeRange: TimeRange = '7d', customRange?: Custo
         zapperLoyalty,
         contentPerformance,
         hashtagPerformance,
-        loadingState: {
-          isLoading: progressiveData.isLoading || _contentLoading || _profilesLoading,
-          isComplete: progressiveData.isComplete && !_contentLoading && !_profilesLoading,
-          totalFetched: progressiveData.totalFetched,
-          relayLimit: progressiveData.relayLimit,
-          canLoadMore: !progressiveData.isComplete && !progressiveData.isLoading,
-          loadMoreZaps: progressiveData.loadMoreZaps,
-          autoLoadEnabled: progressiveData.autoLoadEnabled,
-          consecutiveFailures: progressiveData.consecutiveFailures,
-          toggleAutoLoad: progressiveData.toggleAutoLoad,
-          restartAutoLoad: progressiveData.restartAutoLoad,
-        },
       };
     },
     enabled: Boolean(shouldQueryData),
     staleTime: ZAP_FETCH_CONFIG.STALE_TIME,
     refetchOnWindowFocus: false,
     refetchInterval: false,
+    // Keep previous data visible while refetching (e.g. when totalFetched
+    // changes after a new batch loads). Without this, react-query sets
+    // isLoading=true and clears the data on every queryKey change, causing
+    // all components to flash skeletons on every batch.
+    placeholderData: keepPreviousData,
   });
+
+  return {
+    ...query,
+    data: query.data,
+    // loadingState is computed directly from progressiveData (not through
+    // react-query) so it updates instantly when batch loading starts/stops.
+    loadingState,
+  };
 }

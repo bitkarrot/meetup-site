@@ -3,8 +3,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { ExternalLink, Zap } from 'lucide-react';
 import type { EarningsByContent } from '@/types/zaplytics';
-import { formatSats, truncateText, createNjumpEventLink } from '@/lib/zaplytics/utils';
+import { formatSats, createNjumpEventLink } from '@/lib/zaplytics/utils';
 import { KIND_NAMES } from '@/types/zaplytics';
+import { ContentPreview } from '@/components/zaplytics/ContentPreview';
 
 interface TopContentTableProps {
   data: EarningsByContent[];
@@ -85,14 +86,14 @@ export function TopContentTable({ data, isLoading }: TopContentTableProps) {
                   </span>
                 </div>
                 
-                <p className="text-sm leading-relaxed text-foreground mb-2 break-words break-all">
-                  {item.content ? 
-                    truncateText(item.content, 150) : 
+                <div className="mb-2">
+                  {item.content ?
+                    <ContentPreview content={item.content} maxLength={150} /> :
                     <span className="text-muted-foreground italic">
                       Content unavailable (event ID: {item.eventId.substring(0, 8)}...)
                     </span>
                   }
-                </p>
+                </div>
                 
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                   <div className="flex items-center gap-1">

@@ -106,7 +106,7 @@ export function SchedulePicker({ value, onChange, disabled = false }: SchedulePi
         <p className="text-muted-foreground mb-2">Scheduled for: {scheduledTime}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div>
           <Label htmlFor="schedule-date" className="text-xs">Date</Label>
           <Input

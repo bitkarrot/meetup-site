@@ -23,6 +23,10 @@ export interface AppConfig {
     heroTitle?: string;
     heroSubtitle?: string;
     heroBackground?: string;
+    heroBackgroundType?: 'none' | 'image' | 'color';
+    heroBackgroundColor?: string;
+    heroTextColor?: string;
+    heroBanner?: string;
     heroButtons?: Array<{
       label: string;
       href: string;
@@ -30,20 +34,24 @@ export interface AppConfig {
     }>;
     showEvents?: boolean;
     showBlog?: boolean;
+    showFeed?: boolean;
     feedNpubs?: string[];
     feedReadFromPublishRelays?: boolean;
     maxEvents?: number;
     maxBlogPosts?: number;
+    maxFeedNotes?: number;
     /** Default relay for reading content */
     defaultRelay?: string;
     /** Publishing relays for blasting content */
     publishRelays?: string[];
-    /** Admin roles mapping: pubkey -> 'primary' | 'secondary' */
-    adminRoles?: Record<string, 'primary' | 'secondary'>;
+    /** Admin roles mapping: pubkey -> 'publisher' | 'user' */
+    adminRoles?: Record<string, 'publisher' | 'user'>;
     /** TweakCN theme URL */
     tweakcnThemeUrl?: string;
-    /** Order of settings sections */
+    /** Order of settings sections (admin card ordering) */
     sectionOrder?: string[];
+    /** Order of homepage sections: built-in IDs ('hero','events','blog','feed') and page IDs ('page:/about') */
+    homepageSectionOrder?: string[];
     /** NIP-19 gateway URL (e.g. https://nostr.at or https://njump.me) */
     nip19Gateway?: string;
     /** Blossom relays for media storage */
@@ -54,6 +62,8 @@ export interface AppConfig {
     zaplyticsSectionOrder?: string[];
     /** Whether admin settings are read-only for non-master admins */
     readOnlyAdminAccess?: boolean;
+    /** Whether automatic 24h media harvesting is enabled (daily cron + immediate run) */
+    autoHarvest24h?: boolean;
     /** Last time the site config was updated from/to Nostr */
     updatedAt?: number;
   };

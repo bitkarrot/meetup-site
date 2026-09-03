@@ -1,9 +1,8 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
+import { useBlossomRelays } from '@/hooks/useBlossomRelays';
 import { getMasterPubkey } from '@/lib/relay';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { PageLoadingIndicator } from '@/components/PageLoadingIndicator';
 import { Button } from '@/components/ui/button';
 import Navigation from '@/components/Navigation';
@@ -11,11 +10,14 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useEffect, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { RefreshCw } from 'lucide-react';
+import DOMPurify from 'dompurify';
+import { PageContent } from '@/components/admin/settings/PageContent';
 
 export default function StaticPage({ pathOverride }: { pathOverride?: string }) {
   const { config: appContext } = useAppContext();
   const { path } = useParams<{ path: string }>();
   const { nostr: defaultRelay } = useDefaultRelay();
+  const blossomRelays = useBlossomRelays();
   const [content, setContent] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const fullPath = pathOverride || `/${path}`;
@@ -53,7 +55,7 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
         .filter(event => {
           const authorPubkey = event.pubkey.toLowerCase().trim();
           if (authorPubkey === masterPubkey) return true;
-          return adminRoles[authorPubkey] === 'primary';
+          return adminRoles[authorPubkey] === 'publisher';
         })
         .sort((a, b) => b.created_at - a.created_at)[0] || null;
     },
@@ -78,10 +80,12 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
       }
 
       try {
-        // Try to fetch from common blossom servers
-        const servers = ['https://blossom.primal.net/'];
+        // Try all configured Blossom servers (local relay first, then others)
+        const servers = blossomRelays.length > 0
+          ? blossomRelays
+          : ['https://blossom.primal.net/'];
         let fetchedContent = '';
-        
+
         for (const server of servers) {
           try {
             const response = await fetch(`${server}${sha256}`);
@@ -95,9 +99,7 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
         }
 
         if (fetchedContent) {
-          // If it's a full HTML doc, we might want to extract just the body
-          // for simplicity in this React component, or use an iframe.
-          // For now, let's assume it's content we can render.
+          // If it's a full HTML doc, extract just the body
           if (fetchedContent.includes('<body>')) {
             const bodyMatch = fetchedContent.match(/<body>([\s\S]*)<\/body>/i);
             setContent(bodyMatch ? bodyMatch[1] : fetchedContent);
@@ -114,7 +116,7 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
     }
 
     fetchFromBlossom();
-  }, [pageEvent]);
+  }, [pageEvent, blossomRelays]);
 
   if (isEventLoading) {
     return <PageLoadingIndicator />;
@@ -159,11 +161,17 @@ export default function StaticPage({ pathOverride }: { pathOverride?: string }) 
         </div>
         <article className="prose prose-slate dark:prose-invert max-w-none">
           {isHtml ? (
-            <div dangerouslySetInnerHTML={{ __html: content || '' }} />
+            <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content || '', {
+              USE_PROFILES: { html: true },
+              ADD_TAGS: ['iframe', 'style', 'svg'],
+              ADD_ATTR: [
+                'target', 'allow', 'allowfullscreen', 'frameborder',
+                'scrolling', 'width', 'height', 'referrerpolicy',
+                'loading', 'sandbox',
+              ],
+            }) }} />
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {content || ''}
-            </ReactMarkdown>
+            <PageContent content={content || ''} />
           )}
         </article>
       </main>

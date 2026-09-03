@@ -1,4 +1,4 @@
-import {} from 'react';
+import { useMemo } from 'react';
 import { nip19 } from 'nostr-tools';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
@@ -8,26 +8,24 @@ import { Badge } from '@/components/ui/badge';
 import { PageLoadingIndicator } from '@/components/PageLoadingIndicator';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useDefaultRelay } from '@/hooks/useDefaultRelay';
+import { useNostr } from '@nostrify/react';
+import { type NostrEvent } from '@nostrify/nostrify';
 import { getMasterPubkey } from '@/lib/relay';
-import { parseCalendarEventStartEnd } from '@/lib/eventTime';
+import { useCalendarEvents } from '@/hooks/useCalendarEvents';
+import { isEventLive } from '@/lib/calendarEvents';
+import type { UnifiedCalendarEvent } from '@/lib/calendarEvents';
 import { useQuery } from '@tanstack/react-query';
+import { useHomepagePages } from '@/components/admin/settings/useHomepagePages';
+import { getPageLabel, BUILTIN_HOMEPAGE_SECTION_IDS, type HomepagePage } from '@/components/admin/settings/types';
+import { PageContent } from '@/components/admin/settings/PageContent';
 import Navigation from '@/components/Navigation';
-import { Calendar, MapPin, Clock, ArrowRight, Edit } from 'lucide-react';
+import { FeedItem } from '@/components/FeedItem';
+import { normalizeToHexPubkeys } from '@/lib/utils';
+import { Calendar, MapPin, Clock, ArrowRight, Edit, Video } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthor } from '@/hooks/useAuthor';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-
-interface Event {
-  id: string;
-  title: string;
-  summary: string;
-  location: string;
-  start: number;
-  end?: number;
-  status: string;
-  image?: string;
-}
 
 interface BlogPost {
   id: string;
@@ -83,7 +81,11 @@ function HeroSection() {
   const heroConfig = {
     heroTitle: config.siteConfig?.heroTitle || 'Welcome to Our Community',
     heroSubtitle: config.siteConfig?.heroSubtitle || 'Join us for amazing meetups and events',
-    heroBackground: config.siteConfig?.heroBackground || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&h=1080&fit=crop'
+    heroBackground: config.siteConfig?.heroBackground || '',
+    heroBackgroundType: config.siteConfig?.heroBackgroundType ?? 'none',
+    heroBackgroundColor: config.siteConfig?.heroBackgroundColor || '#1a1a2e',
+    heroTextColor: config.siteConfig?.heroTextColor || '#000000',
+    heroBanner: config.siteConfig?.heroBanner || '',
   };
 
   // Use configured heroButtons if available
@@ -113,59 +115,127 @@ function HeroSection() {
   // Filter out buttons with empty labels or hrefs (disabled buttons)
   const activeButtons = heroButtons.filter(btn => btn.label && btn.href);
 
-  return (
-    <div className="relative h-[600px] overflow-hidden">
-      {/* Background Image */}
-      <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: `url('${heroConfig.heroBackground}')` }}
-      >
-        <div className="absolute inset-0 bg-black/40" />
-      </div>
+  const bgType = heroConfig.heroBackgroundType; // 'none' | 'image' | 'color'
+  const useImage = bgType === 'image' && !!heroConfig.heroBackground;
+  const useColor = bgType === 'color';
+  const textColor = heroConfig.heroTextColor;
 
-      {/* Content */}
-      <div className="relative isolate flex items-center justify-center h-full">
-        <div className="text-center px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
-            {heroConfig.heroTitle}
-          </h1>
-          <p className="text-xl sm:text-2xl text-white/90 mb-8 max-w-2xl mx-auto">
-            {heroConfig.heroSubtitle}
-          </p>
-          {activeButtons.length > 0 && (
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              {activeButtons.map((button, index) => (
-                <Button
-                  key={index}
-                  size="lg"
-                  variant={button.variant === 'outline' ? 'outline' : 'default'}
-                  className={`text-lg px-8 py-3 ${button.variant === 'outline' ? 'text-white border-white hover:bg-white hover:text-black' : ''}`}
-                  asChild
-                >
-                  <Link to={button.href}>
-                    {button.label}
-                    {button.variant !== 'outline' && <ArrowRight className="ml-2 h-5 w-5" />}
-                  </Link>
-                </Button>
-              ))}
-            </div>
-          )}
+  return (
+    <>
+      {/* Optional banner image between nav and hero.
+          The image is height-capped and centered; sides are filled with
+          the actual edge colors of the image (stretched + lightly blurred). */}
+      {heroConfig.heroBanner && (
+        <div className="relative w-full overflow-hidden">
+          {/* Stretched fill background: the image is stretched to fill the
+              full container so the actual edge pixels extend to the sides.
+              A light blur smooths pixelation without losing the real colors. */}
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage: `url('${heroConfig.heroBanner}')`,
+              backgroundSize: '100% 100%',
+              backgroundPosition: 'center',
+              filter: 'blur(12px)',
+            }}
+          />
+          {/* Actual image, centered, not cropped, height-capped */}
+          <div className="relative flex items-center justify-center py-4">
+            <img
+              src={heroConfig.heroBanner}
+              alt=""
+              className="max-h-[400px] w-auto max-w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Hero section: fixed height for image bg, auto height for color/none bg */}
+      <div className={useImage ? "relative h-[600px] overflow-hidden" : "relative overflow-hidden"}>
+        {/* Background */}
+        {useImage ? (
+          <div
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: `url('${heroConfig.heroBackground}')` }}
+          >
+            <div className="absolute inset-0 bg-black/40" />
+          </div>
+        ) : useColor ? (
+          <div
+            className="absolute inset-0"
+            style={{ backgroundColor: heroConfig.heroBackgroundColor }}
+          />
+        ) : null}
+
+        {/* Content */}
+        <div className={`relative isolate flex items-center justify-center ${useImage ? 'h-full' : 'py-20 sm:py-28'}`}>
+          <div className="text-center px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+            <h1
+              className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6"
+              style={{ color: textColor }}
+            >
+              {heroConfig.heroTitle}
+            </h1>
+            <p
+              className="text-xl sm:text-2xl mb-8 max-w-2xl mx-auto"
+              style={{ color: textColor, opacity: 0.9 }}
+            >
+              {heroConfig.heroSubtitle}
+            </p>
+            {activeButtons.length > 0 && (
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                {activeButtons.map((button, index) => (
+                  <Button
+                    key={index}
+                    size="lg"
+                    variant={button.variant === 'outline' ? 'outline' : 'default'}
+                    className={`text-lg px-8 py-3 ${button.variant === 'outline' ? 'hover:bg-white hover:text-black' : ''}`}
+                    style={button.variant === 'outline' ? {
+                      color: textColor,
+                      borderColor: textColor,
+                    } : undefined}
+                    asChild
+                  >
+                    <Link to={button.href}>
+                      {button.label}
+                      {button.variant !== 'outline' && <ArrowRight className="ml-2 h-5 w-5" />}
+                    </Link>
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function EventsSection({ events }: { events: Event[] }) {
+function EventsSection({ events }: { events: UnifiedCalendarEvent[] }) {
   const { config } = useAppContext();
   const showEvents = config.siteConfig?.showEvents !== false;
   const maxEvents = config.siteConfig?.maxEvents || 6;
 
   if (!showEvents) return null;
 
+  const now = Math.floor(Date.now() / 1000);
   const upcomingEvents = events
-    .filter(event => event.end ? event.end * 1000 > Date.now() : event.start * 1000 > Date.now())
+    .filter(event => {
+      const isOngoing = event.end ? event.end > now : event.start > now;
+      return isOngoing || isEventLive(event);
+    })
     .slice(0, maxEvents);
+
+  const getBadge = (event: UnifiedCalendarEvent) => {
+    if (event.type === 'live') {
+      if (event.status === 'live') return { label: 'LIVE NOW', variant: 'destructive' as const, pulse: true };
+      if (event.status === 'ended') return { label: 'Ended', variant: 'outline' as const };
+      return { label: 'Live', variant: 'secondary' as const };
+    }
+    if (event.status === 'tentative') return { label: 'Tentative', variant: 'secondary' as const };
+    if (event.status === 'cancelled') return { label: 'Cancelled', variant: 'outline' as const };
+    return { label: event.status || 'Confirmed', variant: 'default' as const };
+  };
 
   return (
     <section className="py-16 bg-background">
@@ -179,48 +249,67 @@ function EventsSection({ events }: { events: Event[] }) {
 
         {upcomingEvents.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {upcomingEvents.map((event) => (
-              <Card key={event.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                {event.image && (
-                  <div className="h-48 bg-cover bg-center" style={{ backgroundImage: `url('${event.image}')` }} />
-                )}
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <CardTitle className="text-lg">{event.title}</CardTitle>
-                    <Badge variant={event.status === 'confirmed' ? 'default' : 'secondary'}>
-                      {event.status}
-                    </Badge>
-                  </div>
-                  {event.summary && (
-                    <p className="text-sm text-muted-foreground">{event.summary}</p>
+            {upcomingEvents.map((event) => {
+              const badge = getBadge(event);
+              return (
+                <Card key={event.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                  {event.image && (
+                    <div className="h-48 bg-cover bg-center" style={{ backgroundImage: `url('${event.image}')` }} />
                   )}
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" />
-                      {new Date(event.start * 1000).toLocaleDateString()}
-                      {event.end && ` - ${new Date(event.end * 1000).toLocaleDateString()}`}
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-lg">{event.title}</CardTitle>
+                      <Badge variant={badge.variant} className={badge.pulse ? 'animate-pulse' : ''}>
+                        {badge.label}
+                      </Badge>
                     </div>
-                    {event.start > 86400 && ( // Check if it's a time-based event
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        {new Date(event.start * 1000).toLocaleTimeString()}
-                      </div>
+                    {event.summary && (
+                      <p className="text-sm text-muted-foreground">{event.summary}</p>
                     )}
-                    {event.location && (
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">
-                        <MapPin className="h-4 w-4" />
-                        {event.location}
+                        <Calendar className="h-4 w-4" />
+                        {new Date(event.start * 1000).toLocaleDateString()}
+                        {event.end && ` - ${new Date(event.end * 1000).toLocaleDateString()}`}
                       </div>
-                    )}
-                  </div>
-                  <Button className="w-full mt-4" asChild>
-                    <Link to={`/event/${event.id}`}>View Details</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                      {(event.kind === 31923 || event.type === 'live') && (
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4" />
+                          {new Date(event.start * 1000).toLocaleTimeString()}
+                        </div>
+                      )}
+                      {event.type === 'calendar' && event.location && (
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4" />
+                          {event.location}
+                        </div>
+                      )}
+                      {event.type === 'live' && event.room && (
+                        <div className="flex items-center gap-2">
+                          <Video className="h-4 w-4" />
+                          <span>{event.room.name}</span>
+                          {event.room.serviceUrl && (
+                            <a
+                              href={event.room.serviceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-500 hover:underline text-xs"
+                            >
+                              (Join Room)
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <Button className="w-full mt-4" asChild>
+                      <Link to={`/event/${event.id}`}>View Details</Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         ) : (
           <Card>
@@ -307,57 +396,70 @@ function BlogSection({ posts }: { posts: BlogPost[] }) {
   );
 }
 
-const Index = () => {
+function FeedSection({ notes }: { notes: NostrEvent[] }) {
+  const { config } = useAppContext();
+  const showFeed = config.siteConfig?.showFeed === true;
+  const maxNotes = config.siteConfig?.maxFeedNotes || 5;
+
+  if (!showFeed) return null;
+  if (notes.length === 0) return null;
+
+  const displayNotes = notes.slice(0, maxNotes);
+
+  return (
+    <section className="py-16">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold tracking-tight mb-4">Community Feed</h2>
+          <p className="text-lg text-muted-foreground">
+            Latest notes from our community
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {displayNotes.map((note) => (
+            <FeedItem key={note.id} event={note} />
+          ))}
+        </div>
+
+        <div className="text-center mt-12">
+          <Button variant="outline" size="lg" asChild>
+            <Link to="/feed">View Full Feed</Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PageSection({ page }: { page: HomepagePage }) {
+  const title = getPageLabel(page.path);
+
+  return (
+    <section className="py-16 bg-background">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold tracking-tight mb-4">{title}</h2>
+        </div>
+        <div className="prose prose-slate dark:prose-invert max-w-none">
+          <PageContent content={page.content} />
+        </div>
+        <div className="text-center mt-12">
+          <Button variant="outline" size="lg" asChild>
+            <Link to={page.path}>View Full Page</Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const Index = ({ preview = false }: { preview?: boolean } = {}) => {
   const { config } = useAppContext();
   const { nostr } = useDefaultRelay();
-  
-  // Fetch events
-  const { data: events = [], isLoading: eventsLoading } = useQuery({
-    queryKey: ['events', config.siteConfig?.defaultRelay, config.siteConfig?.adminRoles], 
-    queryFn: async () => {
-      const signal = AbortSignal.timeout(5000);
-      const eventList = await nostr!.query([
-        { kinds: [31922, 31923], limit: 50 }
-      ], { signal });
-      
-      const adminRoles = config.siteConfig?.adminRoles || {};
-      const masterPubkey = getMasterPubkey();
 
-      return eventList
-        .filter(event => {
-          const authorPubkey = event.pubkey.toLowerCase().trim();
-          // Always show if author is the master user
-          if (authorPubkey === masterPubkey) return true;
-          
-          const role = adminRoles[authorPubkey];
-          // Only show if author is a primary admin
-          return role === 'primary';
-        })
-        .map(event => {
-        const tags = event.tags || [];
-        const startTag = tags.find(([name]) => name === 'start')?.[1] || '0';
-        const endTag = tags.find(([name]) => name === 'end')?.[1];
-        const { start, end } = parseCalendarEventStartEnd(
-          event.kind,
-          startTag,
-          endTag,
-          event.created_at,
-        );
-
-        return {
-          id: event.id,
-          title: tags.find(([name]) => name === 'title')?.[1] || 'Untitled Event',
-          summary: tags.find(([name]) => name === 'summary')?.[1] || '',
-          location: tags.find(([name]) => name === 'location')?.[1] || '',
-          start,
-          end,
-          status: tags.find(([name]) => name === 'status')?.[1] || 'confirmed',
-          image: tags.find(([name]) => name === 'image')?.[1],
-        };
-      });
-    },
-    enabled: !!nostr,
-  });
+  // Fetch events (calendar + live) using the shared unified calendar hook
+  const { data: events = [], isLoading: eventsLoading } = useCalendarEvents(getMasterPubkey(), 'all');
 
   // Fetch blog posts
   const { data: posts = [], isLoading: postsLoading } = useQuery({
@@ -375,7 +477,7 @@ const Index = () => {
         .filter(event => {
           const authorPubkey = event.pubkey.toLowerCase().trim();
           // Always show if author is the master user
-          if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'primary') return false;
+          if (authorPubkey !== masterPubkey && adminRoles[authorPubkey] !== 'publisher') return false;
           
           // Double check: don't show Kind 30023 if it's explicitly marked as NOT published
           const isPublished = event.tags.find(([name]) => name === 'published')?.[1] !== 'false';
@@ -393,12 +495,54 @@ const Index = () => {
     enabled: !!nostr,
   });
 
+  // Fetch feed notes (only if showFeed is enabled)
+  const showFeed = config.siteConfig?.showFeed === true;
+  const feedNpubs = config.siteConfig?.feedNpubs || [];
+  const maxFeedNotes = config.siteConfig?.maxFeedNotes || 5;
+  const { nostr: nostrGlobal } = useNostr();
+
+  const pubkeys = useMemo(() => normalizeToHexPubkeys(feedNpubs), [feedNpubs]);
+
+  const { data: feedNotes = [] } = useQuery({
+    queryKey: ['homepage-feed-notes', pubkeys],
+    queryFn: async () => {
+      if (pubkeys.length === 0) return [];
+      const signal = AbortSignal.timeout(10000);
+      const events = await nostrGlobal!.query([
+        { kinds: [1], authors: pubkeys, limit: maxFeedNotes * 2 }
+      ], { signal });
+      return events
+        .filter(e => !e.tags.some(([t]) => t === 'e' || t === 'a')) // skip replies
+        .sort((a, b) => b.created_at - a.created_at)
+        .slice(0, maxFeedNotes * 2);
+    },
+    enabled: showFeed && pubkeys.length > 0 && !!nostrGlobal,
+    staleTime: 60000,
+  });
+
+  // Fetch kind 34128 pages flagged as homepage sections.
+  const { data: homepagePages = [], isLoading: homepagePagesLoading } = useHomepagePages({
+    staleTime: 60000,
+    adminRoles: config.siteConfig?.adminRoles,
+  });
+
+  // Build a lookup of page sections by their section ID (page:<path>)
+  const pageSectionMap = useMemo(() => {
+    const map = new Map<string, HomepagePage>();
+    for (const page of homepagePages) {
+      map.set(`page:${page.path}`, page);
+    }
+    return map;
+  }, [homepagePages]);
+
   const siteTitle = config.siteConfig?.title || 'Community Meetup Site';
   const pageTitle = siteTitle;
   const pageDescription = config.siteConfig?.heroSubtitle || 'Join us for amazing meetups and events';
   const previewImage = config.siteConfig?.ogImage;
 
-  useSeoMeta({
+  // Skip SEO side effects in preview mode to avoid leaking meta tags
+  useSeoMeta(
+    preview ? {} : {
     title: pageTitle,
     description: pageDescription,
     ogTitle: pageTitle,
@@ -409,18 +553,47 @@ const Index = () => {
     twitterTitle: pageTitle,
     twitterDescription: pageDescription,
     twitterImage: previewImage,
-  });
+  }
+  );
 
-  if (eventsLoading || postsLoading) {
+  if (eventsLoading || postsLoading || homepagePagesLoading) {
     return <PageLoadingIndicator />;
   }
+
+  // Build the ordered list of homepage sections.
+  // Built-in IDs: hero, events, blog, feed.
+  // Page IDs: page:<path> (e.g. page:/about).
+  // Reconcile: keep known IDs in order, append any page sections not yet in the order.
+  const configuredOrder = config.siteConfig?.homepageSectionOrder ?? [...BUILTIN_HOMEPAGE_SECTION_IDS];
+  const pageIds = homepagePages.map(p => `page:${p.path}`);
+  const knownIds = new Set([...BUILTIN_HOMEPAGE_SECTION_IDS, ...pageIds]);
+  const sectionOrder = [
+    ...configuredOrder.filter(id => knownIds.has(id)),
+    ...pageIds.filter(id => !configuredOrder.includes(id)),
+  ];
 
   return (
     <div className="min-h-screen">
       <Navigation />
-      <HeroSection />
-      <EventsSection events={events} />
-      <BlogSection posts={posts} />
+      {sectionOrder.map((sectionId) => {
+        if (sectionId.startsWith('page:')) {
+          const page = pageSectionMap.get(sectionId);
+          if (!page) return null;
+          return <PageSection key={sectionId} page={page} />;
+        }
+        switch (sectionId) {
+          case 'hero':
+            return <HeroSection key="hero" />;
+          case 'events':
+            return <EventsSection key="events" events={events} />;
+          case 'blog':
+            return <BlogSection key="blog" posts={posts} />;
+          case 'feed':
+            return <FeedSection key="feed" notes={feedNotes} />;
+          default:
+            return null;
+        }
+      })}
     </div>
   );
 };

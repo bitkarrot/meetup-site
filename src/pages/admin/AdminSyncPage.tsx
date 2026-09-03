@@ -166,6 +166,7 @@ export default function AdminSyncPage() {
     const [customSource, setCustomSource] = useState('');
     const [customTarget, setCustomTarget] = useState('');
 
+    const [useTimeRange, setUseTimeRange] = useState(false);
     const [sinceHours, setSinceHours] = useState<number>(-24);
     const [untilHours, setUntilHours] = useState<number>(0);
     const [dateRange, setDateRange] = useState<DateRange | undefined>();
@@ -181,8 +182,8 @@ export default function AdminSyncPage() {
     const statusRef = useRef<HTMLDivElement>(null);
 
     useSeoMeta({
-        title: 'Sync Content - Admin',
-        description: 'Sync content between relays and manage relay settings.',
+        title: 'Sync & Backup - Admin',
+        description: 'Back up your events to other relays and manage relay settings.',
     });
 
     // --- Settings Handlers ---
@@ -319,6 +320,7 @@ export default function AdminSyncPage() {
     };
 
     const getSelectedRangeText = () => {
+        if (!useTimeRange) return 'All time (no filter)';
         const now = new Date();
         const start = addHours(now, sinceHours);
         const end = addHours(now, untilHours);
@@ -327,7 +329,7 @@ export default function AdminSyncPage() {
 
     const getRelayOptions = () => {
         const options = [
-            ...config.relayMetadata.relays.map(r => ({ label: r.url.replace(/^wss?:\/\//, ''), value: r.url })),
+            ...config.relayMetadata.relays.filter(r => !!r.url).map(r => ({ label: r.url.replace(/^wss?:\/\//, ''), value: r.url })),
         ];
 
         // Add CMS Default Relay
@@ -340,6 +342,100 @@ export default function AdminSyncPage() {
 
         options.push({ label: 'Custom URL...', value: 'custom' });
         return options;
+    };
+
+    // Count-only check: fetch the user's events from the source relay
+    // without republishing anywhere. Answers "how many of my events are
+    // on this relay?" — the first half of "do I have a proper backup?"
+    const handleCheckBackup = async () => {
+        if (!user) return;
+
+        const sourceUrl = sourceRelay === 'custom' ? customSource : sourceRelay;
+
+        if (!sourceUrl) {
+            addLog('Please select a source relay to check.', 'error');
+            return;
+        }
+
+        setIsSyncing(true);
+        setProgress(0);
+        setLogs([]);
+        setStats({ fetched: 0, published: 0, errors: 0 });
+        addLog(`Checking backup status on ${sourceUrl}...`);
+
+        try {
+            const source = new NRelay1(sourceUrl);
+
+            const kinds = syncAll ? undefined : selectedKinds.length > 0 ? selectedKinds : undefined;
+            const now = new Date();
+            const since = useTimeRange ? Math.floor(addHours(now, sinceHours).getTime() / 1000) : undefined;
+            const until = useTimeRange ? Math.floor(addHours(now, untilHours).getTime() / 1000) : undefined;
+
+            const filters = [{
+                authors: [user.pubkey],
+                kinds,
+                ...(since !== undefined && { since }),
+                ...(until !== undefined && { until }),
+            }];
+
+            if (useTimeRange) {
+                addLog(`Time range: ${new Date(since! * 1000).toLocaleString()} to ${new Date(until! * 1000).toLocaleString()}`);
+            } else {
+                addLog('Time range: All time (no filter)');
+            }
+            addLog(`Fetching events for ${user.pubkey.slice(0, 8)}...`);
+
+            let totalCount = 0;
+            const kindCounts: Record<number, number> = {};
+            const PAGE_SIZE = 500;
+
+            try {
+                let untilCursor: number | undefined = until;
+                while (true) {
+                    const pageFilter = { ...filters[0], limit: PAGE_SIZE, ...(untilCursor !== undefined && { until: untilCursor }) };
+                    const page = await source.query([pageFilter]);
+                    if (page.length === 0) break;
+                    for (const event of page) {
+                        totalCount++;
+                        kindCounts[event.kind] = (kindCounts[event.kind] || 0) + 1;
+                        setStats(prev => ({ ...prev, fetched: prev.fetched + 1 }));
+                    }
+                    if (totalCount % 50 === 0) {
+                        addLog(`Found ${totalCount} events so far...`);
+                    }
+                    if (page.length < PAGE_SIZE) break;
+                    const oldest = page.reduce((min, ev) => ev.created_at < min ? ev.created_at : min, page[0].created_at);
+                    const nextUntil = oldest - 1;
+                    if (since !== undefined && nextUntil < since) break;
+                    untilCursor = nextUntil;
+                }
+            } catch (e) {
+                console.error("Fetch error", e);
+                addLog(`Error fetching from source: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                setIsSyncing(false);
+                return;
+            }
+
+            addLog(`Check complete: you have ${totalCount} events on ${sourceUrl}.`, 'success');
+
+            // Log a per-kind breakdown
+            const sortedKinds = Object.entries(kindCounts).sort((a, b) => b[1] - a[1]);
+            if (sortedKinds.length > 0) {
+                const breakdown = sortedKinds.map(([k, v]) => `Kind ${k}: ${v}`).join(', ');
+                addLog(`Breakdown — ${breakdown}`, 'info');
+            }
+
+            if (totalCount > 0) {
+                addLog('To back up these events, set a target relay and click "Start Sync".', 'info');
+            }
+
+            setProgress(100);
+        } catch (error) {
+            console.error("Check error", error);
+            addLog(`Unexpected error during check: ${error instanceof Error ? error.message : String(error)}`, 'error');
+        } finally {
+            setIsSyncing(false);
+        }
     };
 
     const handleSync = async () => {
@@ -367,7 +463,7 @@ export default function AdminSyncPage() {
         setProgress(0);
         setLogs([]);
         setStats({ fetched: 0, published: 0, errors: 0 });
-        addLog(`Starting sync from ${sourceUrl} to ${targetUrl}...`);
+        addLog(`Starting backup sync from ${sourceUrl} to ${targetUrl}...`);
 
         try {
             const source = new NRelay1(sourceUrl);
@@ -377,29 +473,44 @@ export default function AdminSyncPage() {
 
             const kinds = syncAll ? undefined : selectedKinds;
             const now = new Date();
-            const since = Math.floor(addHours(now, sinceHours).getTime() / 1000);
-            const until = Math.floor(addHours(now, untilHours).getTime() / 1000);
+            const since = useTimeRange ? Math.floor(addHours(now, sinceHours).getTime() / 1000) : undefined;
+            const until = useTimeRange ? Math.floor(addHours(now, untilHours).getTime() / 1000) : undefined;
 
             const filters = [{
                 authors: [user.pubkey],
                 kinds,
-                since,
-                until
+                ...(since !== undefined && { since }),
+                ...(until !== undefined && { until }),
             }];
 
-            addLog(`Time range: ${new Date(since * 1000).toLocaleString()} to ${new Date(until * 1000).toLocaleString()}`);
+            if (useTimeRange) {
+                addLog(`Time range: ${new Date(since! * 1000).toLocaleString()} to ${new Date(until! * 1000).toLocaleString()}`);
+            } else {
+                addLog('Time range: All time (no filter)');
+            }
             addLog(`Fetching events for ${user.pubkey.slice(0, 8)}...`);
 
             const events: NostrEvent[] = [];
+            const PAGE_SIZE = 500;
 
             try {
-                const result = await source.query(filters);
-                for (const event of result) {
-                    events.push(event);
-                    setStats(prev => ({ ...prev, fetched: prev.fetched + 1 }));
-                    if (events.length % 10 === 0) {
+                let untilCursor: number | undefined = until;
+                while (true) {
+                    const pageFilter = { ...filters[0], limit: PAGE_SIZE, ...(untilCursor !== undefined && { until: untilCursor }) };
+                    const page = await source.query([pageFilter]);
+                    if (page.length === 0) break;
+                    for (const event of page) {
+                        events.push(event);
+                        setStats(prev => ({ ...prev, fetched: prev.fetched + 1 }));
+                    }
+                    if (events.length % 50 === 0) {
                         addLog(`Fetched ${events.length} events...`);
                     }
+                    if (page.length < PAGE_SIZE) break; // last page
+                    const oldest = page.reduce((min, ev) => ev.created_at < min ? ev.created_at : min, page[0].created_at);
+                    const nextUntil = oldest - 1;
+                    if (since !== undefined && nextUntil < since) break;
+                    untilCursor = nextUntil;
                 }
             } catch (e) {
                 console.error("Fetch error", e);
@@ -456,9 +567,9 @@ export default function AdminSyncPage() {
     return (
         <div className="space-y-6">
             <div className="flex flex-col gap-2">
-                <h1 className="text-3xl font-bold tracking-tight">Sync & Settings</h1>
+                <h1 className="text-3xl font-bold tracking-tight">Sync & Backup</h1>
                 <p className="text-muted-foreground text-lg">
-                    Manage your relays and sync content between them.
+                    Back up your events to other relays and manage relay settings.
                 </p>
             </div>
 
@@ -470,6 +581,15 @@ export default function AdminSyncPage() {
 
                 {/* --- SYNC TAB --- */}
                 <TabsContent value="sync" className="space-y-6">
+                    {/* Backup info banner */}
+                    <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-1">
+                        <p className="text-sm font-medium">Backup & Sync</p>
+                        <p className="text-sm text-muted-foreground">
+                            Use <strong>Check My Backup</strong> to see how many of your events are on the source relay.
+                            Then set a target relay and click <strong>Start Sync</strong> to copy them — that's your backup.
+                        </p>
+                    </div>
+
                     <div className="grid gap-6 md:grid-cols-2">
                         {/* Source Relay */}
                         <Card>
@@ -537,65 +657,74 @@ export default function AdminSyncPage() {
                             <CardDescription>Select the time period to sync notes from</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Since (hours)</Label>
-                                    <Input
-                                        type="number"
-                                        value={sinceHours}
-                                        onChange={e => setSinceHours(Number(e.target.value))}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Until (hours)</Label>
-                                    <Input
-                                        type="number"
-                                        value={untilHours}
-                                        onChange={e => setUntilHours(Number(e.target.value))}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Select Date Range</Label>
-                                    <Popover>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant={"outline"}
-                                                className={cn(
-                                                    "w-full justify-start text-left font-normal",
-                                                    !dateRange && "text-muted-foreground"
-                                                )}
-                                            >
-                                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                                {dateRange?.from ? (
-                                                    dateRange.to ? (
-                                                        <>
-                                                            {format(dateRange.from, "LLL dd, y")} -{" "}
-                                                            {format(dateRange.to, "LLL dd, y")}
-                                                        </>
-                                                    ) : (
-                                                        format(dateRange.from, "LLL dd, y")
-                                                    )
-                                                ) : (
-                                                    <span>Pick a date</span>
-                                                )}
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0" align="start">
-                                            <Calendar
-                                                initialFocus
-                                                mode="range"
-                                                defaultMonth={dateRange?.from}
-                                                selected={dateRange}
-                                                onSelect={handleDateRangeSelect}
-                                                numberOfMonths={2}
-                                            />
-                                        </PopoverContent>
-                                    </Popover>
-                                </div>
+                            <div className="flex items-center justify-between">
+                                <Label htmlFor="use-time-range">Limit to time range</Label>
+                                <Switch
+                                    id="use-time-range"
+                                    checked={useTimeRange}
+                                    onCheckedChange={setUseTimeRange}
+                                />
                             </div>
+                            {useTimeRange && (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Since (hours ago)</Label>
+                                        <Input
+                                            type="number"
+                                            value={sinceHours}
+                                            onChange={e => setSinceHours(Number(e.target.value))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Until (hours ago)</Label>
+                                        <Input
+                                            type="number"
+                                            value={untilHours}
+                                            onChange={e => setUntilHours(Number(e.target.value))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Select Date Range</Label>
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant={"outline"}
+                                                    className={cn(
+                                                        "w-full justify-start text-left font-normal",
+                                                        !dateRange && "text-muted-foreground"
+                                                    )}
+                                                >
+                                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                                    {dateRange?.from ? (
+                                                        dateRange.to ? (
+                                                            <>
+                                                                {format(dateRange.from, "LLL dd, y")} -{" "}
+                                                                {format(dateRange.to, "LLL dd, y")}
+                                                            </>
+                                                        ) : (
+                                                            format(dateRange.from, "LLL dd, y")
+                                                        )
+                                                    ) : (
+                                                        <span>Pick a date</span>
+                                                    )}
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0" align="start">
+                                                <Calendar
+                                                    initialFocus
+                                                    mode="range"
+                                                    defaultMonth={dateRange?.from}
+                                                    selected={dateRange}
+                                                    onSelect={handleDateRangeSelect}
+                                                    numberOfMonths={2}
+                                                />
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
+                                </div>
+                            )}
                             <div className="text-sm text-muted-foreground font-mono bg-muted/50 p-2 rounded">
-                                <strong>Selected range (Local Time):</strong><br />
-                                {getSelectedRangeText()}
+                                <strong>Selected range:</strong> {getSelectedRangeText()}
                             </div>
                         </CardContent>
                     </Card>
@@ -691,30 +820,52 @@ export default function AdminSyncPage() {
                                 </div>
                             )}
 
-                            <Button
-                                className="w-full md:w-auto md:min-w-[200px]"
-                                size="lg"
-                                onClick={handleSync}
-                                disabled={isSyncing || !user}
-                                title={!user ? "Please login to sync" : "Start Sync"}
-                            >
-                                {isSyncing ? (
-                                    <>
-                                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                                        Syncing...
-                                    </>
-                                ) : !user ? (
-                                    <>
-                                        <XCircle className="mr-2 h-4 w-4" />
-                                        Login Required
-                                    </>
-                                ) : (
-                                    <>
-                                        <RefreshCw className="mr-2 h-4 w-4" />
-                                        Start Sync
-                                    </>
-                                )}
-                            </Button>
+                            <div className="flex flex-wrap gap-3">
+                                <Button
+                                    variant="outline"
+                                    size="lg"
+                                    onClick={handleCheckBackup}
+                                    disabled={isSyncing || !user}
+                                    title={!user ? "Please login to check" : "Count your events on the source relay"}
+                                >
+                                    {isSyncing ? (
+                                        <>
+                                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                                            Checking...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Wifi className="mr-2 h-4 w-4" />
+                                            Check My Backup
+                                        </>
+                                    )}
+                                </Button>
+
+                                <Button
+                                    className="w-full md:w-auto md:min-w-[200px]"
+                                    size="lg"
+                                    onClick={handleSync}
+                                    disabled={isSyncing || !user}
+                                    title={!user ? "Please login to sync" : "Start Sync"}
+                                >
+                                    {isSyncing ? (
+                                        <>
+                                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                                            Syncing...
+                                        </>
+                                    ) : !user ? (
+                                        <>
+                                            <XCircle className="mr-2 h-4 w-4" />
+                                            Login Required
+                                        </>
+                                    ) : (
+                                        <>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            Start Sync
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
 
                         </CardContent>
                     </Card>
